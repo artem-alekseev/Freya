@@ -38,6 +38,7 @@ const (
 	SwapEquipmentItem = "SwapEquipmentItem"
 	MoveEquipmentItem = "MoveEquipmentItem"
 	AddItem           = "AddItem"
+	PurchaseItem      = "PurchaseItem"
 	StackItem         = "StackItem"
 	RemoveItem        = "RemoveItem"
 	SwapItem          = "SwapItem"
@@ -46,8 +47,9 @@ const (
 
 // Skill related RPC's
 const (
-	SaveSkill         = "SaveSkill"
-	QuickLinkSet      = "QuickLinkSet"
-	QuickLinkRemove   = "QuickLinkRemove"
-	QuickLinkSwap     = "QuickLinkSwap"
+	LearnSkill      = "LearnSkill"
+	SaveSkill       = "SaveSkill"
+	QuickLinkSet    = "QuickLinkSet"
+	QuickLinkRemove = "QuickLinkRemove"
+	QuickLinkSwap   = "QuickLinkSwap"
 )

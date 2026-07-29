@@ -10,3 +10,11 @@ type SkillRequest struct {
 type SkillResponse struct {
 	Result bool
 }
+
+type LearnRequest struct {
+	Server        byte
+	Character     int32
+	InventorySlot uint16
+	ItemID        uint32
+	Skill         Skill
+}

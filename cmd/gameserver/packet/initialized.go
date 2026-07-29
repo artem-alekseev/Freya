@@ -92,10 +92,10 @@ func Initialized(session *network.Session, reader *network.Reader) {
 	pkt.WriteInt32(0x01)
 	pkt.WriteInt32(0x0100001F)
 
-	pkt.WriteUint16(c.X)      // +
-	pkt.WriteUint16(c.Y)      // +
-	pkt.WriteUint64(c.Exp)    // +
-	pkt.WriteUint64(10000000) // +c.Alz
+	pkt.WriteUint16(c.X)   // +
+	pkt.WriteUint16(c.Y)   // +
+	pkt.WriteUint64(c.Exp) // +
+	pkt.WriteUint64(c.Alz)
 	pkt.WriteUint64(c.WarExp) // +
 	pkt.WriteUint32(c.Level)  // +
 
@@ -220,13 +220,13 @@ func Initialized(session *network.Session, reader *network.Reader) {
 	c.Skills = res.Skills
 
 	// set-up RPC and data inside inventory to sync with the database
-	c.Inventory.Setup(g_RPCHandler, c.Id, byte(g_ServerSettings.ChannelId))
+	c.Inventory.Setup(g_RPCHandler, c.Id, byte(g_ServerSettings.ServerId))
 
 	// set-up RPC and data inside equipment to sync with the database
-	c.Equipment.Setup(g_RPCHandler, c.Id, byte(g_ServerSettings.ChannelId))
+	c.Equipment.Setup(g_RPCHandler, c.Id, byte(g_ServerSettings.ServerId))
 
 	// set-up RPC and data inside links to sync with the database
-	c.Links.Setup(g_RPCHandler, c.Id, byte(g_ServerSettings.ChannelId))
+	c.Links.Setup(g_RPCHandler, c.Id, byte(g_ServerSettings.ServerId))
 
 	ctx.Mutex.Lock()
 	ctx.Char = &c

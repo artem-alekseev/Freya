@@ -7,6 +7,7 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/ubis/Freya/share/models/skills"
 	"github.com/ubis/Freya/share/rpc"
 )
 
@@ -62,11 +63,75 @@ func (e *Inventory) Set(slot uint16, item Item) (bool, error) {
 	defer e.mutex.Unlock()
 
 	ok, err := e.sync(rpc.AddItem, &item, nil)
-	if err == nil {
+	if err == nil && ok {
 		e.Inv[int(slot)] = item
 	}
 
 	return ok, err
+}
+
+// Purchase atomically persists a purchased item and its price before adding
+// it to the in-memory inventory.
+func (e *Inventory) Purchase(item Item, price uint64) (bool, uint64, error) {
+	e.mutex.Lock()
+	defer e.mutex.Unlock()
+
+	if _, exists := e.Inv[int(item.Slot)]; exists {
+		return false, 0, errors.New("inventory slot is already occupied")
+	}
+	if e.rpcHandler == nil {
+		return false, 0, errors.New("rpc handler is not ready")
+	}
+
+	req := PurchaseRequest{
+		Server:    e.serverId,
+		Character: e.character,
+		Item:      item,
+		Price:     price,
+	}
+	res := PurchaseResponse{}
+	if err := e.rpcHandler.Call(rpc.PurchaseItem, &req, &res); err != nil {
+		return false, 0, err
+	}
+	if !res.Result {
+		return false, res.Alz, nil
+	}
+
+	e.Inv[int(item.Slot)] = item
+	return true, res.Alz, nil
+}
+
+// ConsumeSkillBook atomically removes a skill book from persistent inventory
+// and inserts the learned skill before updating the in-memory inventory.
+func (e *Inventory) ConsumeSkillBook(slot uint16, itemID uint32, skill skills.Skill) (bool, error) {
+	e.mutex.Lock()
+	defer e.mutex.Unlock()
+
+	item, exists := e.Inv[int(slot)]
+	if !exists || item.Kind != itemID {
+		return false, errors.New("skill book does not exist in the inventory slot")
+	}
+	if e.rpcHandler == nil {
+		return false, errors.New("rpc handler is not ready")
+	}
+
+	req := skills.LearnRequest{
+		Server:        e.serverId,
+		Character:     e.character,
+		InventorySlot: slot,
+		ItemID:        itemID,
+		Skill:         skill,
+	}
+	res := skills.SkillResponse{}
+	if err := e.rpcHandler.Call(rpc.LearnSkill, &req, &res); err != nil {
+		return false, err
+	}
+	if !res.Result {
+		return false, nil
+	}
+
+	delete(e.Inv, int(slot))
+	return true, nil
 }
 
 // Stack inventory item

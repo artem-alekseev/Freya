@@ -137,6 +137,57 @@ func AddItem(c *rpc.Client, r *inventory.ItemRequest, s *inventory.ItemResponse)
 	return nil
 }
 
+func PurchaseItem(_ *rpc.Client, r *inventory.PurchaseRequest, s *inventory.PurchaseResponse) error {
+	db := g_DatabaseManager.Get(r.Server)
+	s.Result = false
+	if r.Price == 0 || r.Item.Kind == 0 {
+		return nil
+	}
+
+	tx, err := db.Beginx()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var alz uint64
+	if err := tx.Get(&alz, "SELECT alz FROM characters WHERE id = ? FOR UPDATE", r.Character); err != nil {
+		return err
+	}
+	s.Alz = alz
+	if alz < r.Price {
+		return nil
+	}
+
+	var occupied int
+	if err := tx.Get(&occupied,
+		"SELECT COUNT(*) FROM characters_inventory WHERE id = ? AND slot = ?",
+		r.Character, r.Item.Slot); err != nil {
+		return err
+	}
+	if occupied != 0 {
+		return nil
+	}
+
+	if _, err := tx.Exec(
+		"INSERT INTO characters_inventory (id, kind, serials, opt, slot, expire) "+
+			"VALUES (?, ?, ?, ?, ?, ?)",
+		r.Character, r.Item.Kind, r.Item.Serials, r.Item.Option, r.Item.Slot, r.Item.Expire); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("UPDATE characters SET alz = alz - ? WHERE id = ?", r.Price, r.Character); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
+	s.Result = true
+	s.Alz = alz - r.Price
+	return nil
+}
+
 func StackItem(c *rpc.Client, r *inventory.ItemRequest, s *inventory.ItemResponse) error {
 	var db = g_DatabaseManager.Get(r.Server)
 

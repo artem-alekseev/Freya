@@ -10,5 +10,8 @@ log/*
 pkg/*
 cfg/*
 
+## Ignore decoded client data
+enc/
+
 ## Ignore macOS FS files
 .DS_Store

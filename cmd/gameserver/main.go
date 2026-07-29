@@ -1,10 +1,14 @@
 package main
 
 import (
+	"path/filepath"
+
+	"github.com/ubis/Freya/cmd/gameserver/clientdata"
 	"github.com/ubis/Freya/cmd/gameserver/def"
 	"github.com/ubis/Freya/cmd/gameserver/game"
 	"github.com/ubis/Freya/cmd/gameserver/packet"
 	"github.com/ubis/Freya/cmd/gameserver/rpc"
+	"github.com/ubis/Freya/share/directory"
 	"github.com/ubis/Freya/share/log"
 	"github.com/ubis/Freya/share/script"
 )
@@ -21,6 +25,13 @@ func main() {
 
 	// read config
 	g_ServerConfig.Read()
+
+	stats, err := clientdata.Initialize(filepath.Join(directory.Root(), "enc"))
+	if err != nil {
+		log.Fatal("Unable to load client data: ", err.Error())
+		return
+	}
+	log.Infof("Loaded %d skill books in %d trainer catalogs from client DEC files", stats.Books, stats.Worlds)
 
 	game := &game.WorldManager{SpawnMobs: g_ServerConfig.SpawnMobs}
 	game.Initialize()

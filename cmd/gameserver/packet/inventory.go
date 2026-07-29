@@ -1,9 +1,11 @@
 package packet
 
 import (
+	"github.com/ubis/Freya/cmd/gameserver/clientdata"
 	"github.com/ubis/Freya/cmd/gameserver/context"
 	"github.com/ubis/Freya/share/log"
 	"github.com/ubis/Freya/share/models/inventory"
+	"github.com/ubis/Freya/share/models/skills"
 	"github.com/ubis/Freya/share/network"
 )
 
@@ -307,26 +309,140 @@ func ItemSelling(session *network.Session, reader *network.Reader) {
 }
 
 func BuySkillBook(session *network.Session, reader *network.Reader) {
-	_ = reader.ReadByte()  //bNpcIdx
-	_ = reader.ReadInt16() //wSetIdx
-	_ = reader.ReadInt16() //wSkillIdx
-	_ = reader.ReadInt16() //wSlotIdx
+	npcIndex := reader.ReadByte()
+	setIndex := reader.ReadUint16()
+	skillIndex := reader.ReadUint16()
+	slot := reader.ReadUint16()
 
+	ctx, err := context.Parse(session)
+	if err != nil {
+		log.Error(err.Error())
+		sendBuySkillBookResult(session, false, inventory.Item{})
+		return
+	}
+
+	ctx.Mutex.RLock()
+	worldID := ctx.Char.World
+	characterID := ctx.Char.Id
+	characterInventory := ctx.Char.Inventory
+	ctx.Mutex.RUnlock()
+
+	book, exists := clientdata.FindSkillBook(worldID, npcIndex, setIndex)
+	if !exists || book.SkillID != skillIndex {
+		log.Warningf(
+			"Rejected skill book purchase: character %d, world %d, NPC %d, set %d, skill %d",
+			characterID, worldID, npcIndex, setIndex, skillIndex)
+		sendBuySkillBookResult(session, false, inventory.Item{})
+		return
+	}
+
+	item := inventory.Item{Kind: book.ItemID, Slot: slot}
+	result, alz, err := characterInventory.Purchase(item, uint64(book.Price))
+	if err != nil {
+		log.Errorf("Unable to purchase skill book item %d for character %d: %s", book.ItemID, characterID, err.Error())
+		sendBuySkillBookResult(session, false, inventory.Item{})
+		return
+	}
+	if result {
+		ctx.Mutex.Lock()
+		ctx.Char.Alz = alz
+		ctx.Mutex.Unlock()
+		log.Infof(
+			"Character %d purchased skill book item %d for skill %d at %d Alz in slot %d",
+			characterID, book.ItemID, book.SkillID, book.Price, slot)
+	}
+
+	sendBuySkillBookResult(session, result, item)
+}
+
+func sendBuySkillBookResult(session *network.Session, result bool, item inventory.Item) {
 	pkt := network.NewWriter(BUY_SKILL_BOOK)
-	pkt.WriteByte(0)
-	pkt.WriteInt32(1967)
-	pkt.WriteInt32(0)
-	pkt.WriteInt32(0)
-	pkt.WriteInt32(0)
+	if result {
+		pkt.WriteByte(0)
+	} else {
+		pkt.WriteByte(1)
+	}
+	pkt.WriteUint32(item.Kind)
+	pkt.WriteUint32(item.Serials)
+	pkt.WriteInt32(item.Option)
+	pkt.WriteUint32(uint32(item.Slot))
 
 	session.Send(pkt)
 }
 
 func ItemUsing(session *network.Session, reader *network.Reader) {
-	_ = reader.ReadInt16() //bSlotIdx
+	slot := reader.ReadUint16()
 
+	ctx, err := context.Parse(session)
+	if err != nil {
+		log.Error(err.Error())
+		sendItemUsingResult(session, false)
+		return
+	}
+
+	ctx.Mutex.RLock()
+	characterID := ctx.Char.Id
+	characterInventory := ctx.Char.Inventory
+	ctx.Mutex.RUnlock()
+
+	item := characterInventory.Get(slot)
+	book, isSkillBook := clientdata.FindSkillBookItem(item.Kind)
+	if !isSkillBook {
+		log.Warningf("Rejected unsupported item use: character %d, item %d, slot %d", characterID, item.Kind, slot)
+		sendItemUsingResult(session, false)
+		return
+	}
+
+	ctx.Mutex.RLock()
+	for _, learned := range ctx.Char.Skills.List {
+		if learned.Id == book.SkillID {
+			ctx.Mutex.RUnlock()
+			log.Warningf("Character %d already knows skill %d", characterID, book.SkillID)
+			sendItemUsingResult(session, false)
+			return
+		}
+	}
+
+	skillSlot := -1
+	for candidate := 0; candidate <= int(^uint16(0)); candidate++ {
+		if _, occupied := ctx.Char.Skills.List[candidate]; !occupied {
+			skillSlot = candidate
+			break
+		}
+	}
+	ctx.Mutex.RUnlock()
+	if skillSlot < 0 {
+		log.Warningf("Character %d has no free skill slot", characterID)
+		sendItemUsingResult(session, false)
+		return
+	}
+
+	skill := skills.Skill{Id: book.SkillID, Level: book.Level, Slot: uint16(skillSlot)}
+	result, err := characterInventory.ConsumeSkillBook(slot, book.ItemID, skill)
+	if err != nil {
+		log.Errorf("Unable to use skill book item %d for character %d: %s", book.ItemID, characterID, err.Error())
+		sendItemUsingResult(session, false)
+		return
+	}
+	if result {
+		ctx.Mutex.Lock()
+		ctx.Char.Skills.Set(skill.Slot, skill)
+		ctx.Mutex.Unlock()
+		log.Infof(
+			"Character %d learned skill %d level %d from item %d in skill slot %d",
+			characterID, skill.Id, skill.Level, book.ItemID, skill.Slot)
+	}
+
+	sendItemUsingResult(session, result)
+}
+
+func sendItemUsingResult(session *network.Session, result bool) {
 	pkt := network.NewWriter(ITEM_USING)
-	pkt.WriteByte(0)
+	if result {
+		pkt.WriteByte(0)
+	} else {
+		pkt.WriteByte(1)
+	}
 
 	session.Send(pkt)
 }
