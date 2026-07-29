@@ -1,6 +1,8 @@
 package game
 
 import (
+	"github.com/ubis/Freya/share/models/inventory"
+	"github.com/ubis/Freya/share/network"
 	"math/rand"
 	"reflect"
 	"sync"
@@ -105,6 +107,32 @@ func (m *Mob) GetHealth() (int, int) {
 	defer m.mutex.RUnlock()
 
 	return m.CurrentHP, m.MaxHP
+}
+
+func (m *Mob) SubHealth(hp int) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	m.CurrentHP -= hp
+
+	log.Debug(m.CurrentHP)
+	if m.CurrentHP <= 0 {
+		m.cell.RemoveMob(m)
+
+		pkt := network.NewWriter(packet.NFY_DELLINKMOBS)
+
+		pkt.WriteInt32(0)
+		pkt.WriteUint16(1)
+
+		pkt.WriteInt32(m.Id)
+		pkt.WriteByte(21) // Тип удаления
+		pkt.WriteByte(0)  // Флаг респауна
+
+		m.world.BroadcastPacket(m.cell.column, m.cell.row, pkt)
+
+		item := inventory.Item{Kind: 1, Serials: 1, Option: 1, Slot: 0, Expire: 0}
+		m.cell.world.DropItem(&item, 0, m.position.CurrentX, m.position.CurrentY)
+	}
 }
 
 // GetPosition safely retrieves the mob's position in the world.

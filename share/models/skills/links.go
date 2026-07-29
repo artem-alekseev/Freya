@@ -10,6 +10,18 @@ import (
 	"github.com/ubis/Freya/share/rpc"
 )
 
+type QuickLinkRequest struct {
+	Server  byte
+	Id      int32
+	Command string
+	OldLink *Link
+	NewLink *Link
+}
+
+type QuickLinkResponse struct {
+	Result bool
+}
+
 type Links struct {
 	List  map[int]Link
 	mutex sync.RWMutex

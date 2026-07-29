@@ -7,8 +7,9 @@ import (
 
 // WorldManager manages world maps and their data
 type WorldManager struct {
-	Worlds []*World
-	Warps  []struct {
+	SpawnMobs bool
+	Worlds    []*World
+	Warps     []struct {
 		World byte
 		Warps []context.Warp
 	}
@@ -31,15 +32,21 @@ func (wm *WorldManager) Initialize() {
 		return
 	}
 
-	// load mobs
-	if err := load("mobs.yml", &wm.Mobs); err != nil {
-		log.Error("Failed to load world mob data:", err.Error())
-		return
+	if wm.SpawnMobs {
+		// load mob templates only when spawning is enabled
+		if err := load("mobs.yml", &wm.Mobs); err != nil {
+			log.Error("Failed to load world mob data:", err.Error())
+			return
+		}
+	} else {
+		log.Info("Mob spawning is disabled by configuration")
 	}
 
 	log.Infof("Loaded %d world maps\n", len(wm.Worlds))
 	log.Infof("Loaded %d warps\n", len(wm.Warps))
-	log.Infof("Loaded %d mobs\n", len(wm.Mobs))
+	if wm.SpawnMobs {
+		log.Infof("Loaded %d mobs\n", len(wm.Mobs))
+	}
 
 	// initialize each world
 	for _, v := range wm.Worlds {

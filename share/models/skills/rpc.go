@@ -1,13 +1,12 @@
 package skills
 
-type QuickLinkRequest struct {
-	Server  byte
-	Id      int32
-	Command string
-	OldLink *Link
-	NewLink *Link
+type SkillRequest struct {
+	Server        byte
+	Id            int32
+	PreviousLevel byte
+	Skill         Skill
 }
 
-type QuickLinkResponse struct {
+type SkillResponse struct {
 	Result bool
 }

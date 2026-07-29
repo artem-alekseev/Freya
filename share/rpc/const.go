@@ -46,7 +46,8 @@ const (
 
 // Skill related RPC's
 const (
-	QuickLinkSet    = "QuickLinkSet"
-	QuickLinkRemove = "QuickLinkRemove"
-	QuickLinkSwap   = "QuickLinkSwap"
+	SaveSkill         = "SaveSkill"
+	QuickLinkSet      = "QuickLinkSet"
+	QuickLinkRemove   = "QuickLinkRemove"
+	QuickLinkSwap     = "QuickLinkSwap"
 )

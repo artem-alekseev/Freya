@@ -52,6 +52,10 @@ func (w *World) getWorldCell(x, y int) *Cell {
 	return w.Grid[column][row]
 }
 
+func (w *World) GetId() byte {
+	return w.Id
+}
+
 // getCurrentCell retrieves the cell based on the current character position.
 func (w *World) getCurrentCell(session *network.Session) *Cell {
 	var x, y byte
@@ -199,21 +203,32 @@ func difference(a, b []*Cell) []*Cell {
 	return diff
 }
 
+func (w *World) FindMob(mobId int) context.MobHandler {
+	return w.mobs[mobId]
+}
+
 // Initialize initializes the World grid with Cell instances.
 func (w *World) Initialize(manager *WorldManager) {
 	w.manager = manager
 
 	// load & assign data
 	w.Warps = manager.GetWarps(w.Id)
-	mobs := w.loadMobs()
+	var mobs []*Mob
+	if manager.SpawnMobs {
+		mobs = w.loadMobs()
+	}
 
 	log.Debugf("Loaded %d warps in %d world", len(w.Warps), w.Id)
-	log.Debugf("Loaded %d mobs in %d world", len(mobs), w.Id)
+	if manager.SpawnMobs {
+		log.Debugf("Loaded %d mobs in %d world", len(mobs), w.Id)
+	}
 
 	// initialize everything
 	w.initializeCells()
 	w.loadThreadMap()
-	w.initializeMobs(mobs)
+	if manager.SpawnMobs {
+		w.initializeMobs(mobs)
+	}
 	w.initializeTimers()
 }
 

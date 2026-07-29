@@ -22,7 +22,7 @@ func main() {
 	// read config
 	g_ServerConfig.Read()
 
-	game := &game.WorldManager{}
+	game := &game.WorldManager{SpawnMobs: g_ServerConfig.SpawnMobs}
 	game.Initialize()
 
 	// set server settings

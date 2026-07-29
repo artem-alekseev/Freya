@@ -6,6 +6,7 @@ import (
 
 	"github.com/ubis/Freya/cmd/gameserver/context"
 	"github.com/ubis/Freya/cmd/gameserver/game"
+	gamepacket "github.com/ubis/Freya/cmd/gameserver/packet"
 	"github.com/ubis/Freya/share/event"
 	"github.com/ubis/Freya/share/log"
 	"github.com/ubis/Freya/share/models/server"
@@ -77,9 +78,21 @@ func OnPacketReceive(e *event.Event) {
 		return
 	}
 
-	log.Debugf("Received Packet `%s` (Len: %d, type: %d, src: %s)",
-		g_PacketHandler.Name(a.Type), a.Length, a.Type, a.Session.GetEndPnt(),
-	)
+	switch a.Type {
+	case gamepacket.MOVEBEGINED,
+		gamepacket.MOVEENDED00,
+		gamepacket.MOVECHANGED,
+		gamepacket.MOVETILEPOS,
+		gamepacket.CHANGEDIRECTION,
+		gamepacket.KEYMOVEBEGINED,
+		gamepacket.KEYMOVEENDED00,
+		gamepacket.KEYMOVECHANGED:
+		// Movement packets are frequent and would otherwise drown useful logs.
+	default:
+		log.Debugf("Received Packet `%s` (Len: %d, type: %d, src: %s)",
+			g_PacketHandler.Name(a.Type), a.Length, a.Type, a.Session.GetEndPnt(),
+		)
+	}
 
 	// let it handle
 	g_PacketHandler.Handle(a)
@@ -92,14 +105,14 @@ func OnPacketSend(e *event.Event) {
 		return
 	}
 
-	a, ok := rawPacket.(*network.PacketArgs)
+	_, ok = rawPacket.(*network.PacketArgs)
 	if !ok {
 		return
 	}
 
-	log.Debugf("Sent Packet `%s` (Len: %d, type: %d, src: %s)",
-		g_PacketHandler.Name(a.Type), a.Length, a.Type, a.Session.GetEndPnt(),
-	)
+	//log.Debugf("Sent Packet `%s` (Len: %d, type: %d, src: %s)",
+	//	g_PacketHandler.Name(a.Type), a.Length, a.Type, a.Session.GetEndPnt(),
+	//)
 }
 
 // OnSyncConnect event informs server about successful connection with the Master Server

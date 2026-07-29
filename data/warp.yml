@@ -6,11 +6,20 @@
         id: 15,
         world: 30, # warp gate
         location: [
-          { x: 139, y: 242 }, # capella
-          { x: 139, y: 242 }, # procyon
-          { x: 139, y: 242 }  # neutral
+            { x: 139, y: 242 }, # capella
+            { x: 139, y: 242 }, # procyon
+            { x: 139, y: 242 }  # neutral
         ]
-      }
+      },
+#      {
+#        id: 56,
+#        world: 30, # warp gate
+#        location: [
+#            { x: 20, y: 20 }, # capella
+#            { x: 20, y: 20 }, # procyon
+#            { x: 20, y: 20 }  # neutral
+#        ]
+#      }
     ]
   },
   {

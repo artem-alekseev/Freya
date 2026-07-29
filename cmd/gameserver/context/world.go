@@ -26,6 +26,8 @@ type WorldHandler interface {
 	DropItem(item *inventory.Item, owner int32, x, y int) bool
 	PickItem(id int32) *inventory.Item
 	PeekItem(id int32, key uint16) ItemHandler
+	FindMob(mobId int) MobHandler
+	GetId() byte
 }
 
 // WorldManagerHandler defines the interface for interacting with a world manager.

@@ -172,6 +172,33 @@ func StorageItemSwap(session *network.Session, reader *network.Reader) {
 	session.Send(pkt)
 }
 
+func QueryCashItem(session *network.Session, reader *network.Reader) {
+	pkt := network.NewWriter(QUERYCASHITEM)
+	pkt.WriteInt32(0) //count
+
+	//pkt.WriteInt32(1) //cash item id
+	//pkt.WriteInt32(1) //kind
+	//pkt.WriteInt32(0) // option
+	//pkt.WriteByte(31) // duration
+
+	session.Send(pkt)
+}
+
+func UseCashItem(session *network.Session, reader *network.Reader) {
+	id := reader.ReadInt32()   // cash item id
+	slot := reader.ReadInt16() // slot ??
+
+	pkt := network.NewWriter(USECASHITEM)
+	pkt.WriteInt32(id)   //count
+	pkt.WriteInt32(1)    //item
+	pkt.WriteInt32(0)    // option
+	pkt.WriteInt16(slot) // slot
+	pkt.WriteInt32(30)   //time
+	pkt.WriteInt32(0)    // status
+
+	session.Send(pkt)
+}
+
 func StorageItemDrop(session *network.Session, reader *network.Reader) {
 	_ = reader.ReadInt32() // unk
 	slot := reader.ReadUint16()
@@ -265,6 +292,41 @@ func AccessoryEquip(session *network.Session, reader *network.Reader) {
 
 	pkt := network.NewWriter(ACCESSORY_EQUIP)
 	pkt.WriteBool(ok)
+
+	session.Send(pkt)
+}
+
+func ItemSelling(session *network.Session, reader *network.Reader) {
+	pkt := network.NewWriter(STORAGE_ITEM_DROP)
+	pkt.WriteInt64(10000)
+	pkt.WriteInt32(0)
+	pkt.WriteInt32(0)
+	pkt.WriteInt16(0)
+
+	session.Send(pkt)
+}
+
+func BuySkillBook(session *network.Session, reader *network.Reader) {
+	_ = reader.ReadByte()  //bNpcIdx
+	_ = reader.ReadInt16() //wSetIdx
+	_ = reader.ReadInt16() //wSkillIdx
+	_ = reader.ReadInt16() //wSlotIdx
+
+	pkt := network.NewWriter(BUY_SKILL_BOOK)
+	pkt.WriteByte(0)
+	pkt.WriteInt32(1967)
+	pkt.WriteInt32(0)
+	pkt.WriteInt32(0)
+	pkt.WriteInt32(0)
+
+	session.Send(pkt)
+}
+
+func ItemUsing(session *network.Session, reader *network.Reader) {
+	_ = reader.ReadInt16() //bSlotIdx
+
+	pkt := network.NewWriter(ITEM_USING)
+	pkt.WriteByte(0)
 
 	session.Send(pkt)
 }

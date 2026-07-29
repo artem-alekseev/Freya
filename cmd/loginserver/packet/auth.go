@@ -1,10 +1,8 @@
 package packet
 
 import (
-	"bytes"
 	"time"
 
-	"github.com/ubis/Freya/cmd/loginserver/rsa"
 	"github.com/ubis/Freya/share/event"
 	"github.com/ubis/Freya/share/log"
 	"github.com/ubis/Freya/share/models/account"
@@ -34,24 +32,24 @@ func AuthAccount(session *network.Session, reader *network.Reader) {
 		return
 	}
 
-	// skip 2 bytes
-	reader.ReadUint16()
+	AllLen := int(reader.ReadByte())
+	LoginLen := int(reader.ReadByte())
 
 	// read and decrypt RSA block
-	var loginData = reader.ReadBytes(rsa.RSA_LOGIN_LENGTH)
-	var data, err = g_ServerSettings.RSA.Decrypt(loginData[:])
-	if err != nil {
-		log.Errorf("%s; Src: %s", err.Error(), session.GetEndPnt())
-		session.Close()
-		return
-	}
+	//var loginData = reader.ReadBytes(rsa.RSA_LOGIN_LENGTH)
+	//var data, err = g_ServerSettings.RSA.Decrypt(loginData[:])
+	//if err != nil {
+	//	log.Errorf("%s; Src: %s", err.Error(), session.GetEndPnt())
+	//	session.Close()
+	//	return
+	//}
 
 	// extract name and pass
-	var name = string(bytes.Trim(data[:32], "\x00"))
-	var pass = string(bytes.Trim(data[32:], "\x00"))
+	var name = reader.ReadString(LoginLen)
+	var pass = reader.ReadString(AllLen - LoginLen)
 
 	var r = account.AuthResponse{Status: account.None}
-	err = g_RPCHandler.Call(rpc.AuthCheck, account.AuthRequest{name, pass}, &r)
+	err := g_RPCHandler.Call(rpc.AuthCheck, account.AuthRequest{name, pass}, &r)
 
 	// if server is down...
 	if err != nil {

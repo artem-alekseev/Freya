@@ -14,6 +14,7 @@ type Config struct {
 
 	ServerType        int
 	IgnoreSubPassword bool
+	SpawnMobs         bool
 
 	MasterIp   string
 	MasterPort int
@@ -41,6 +42,7 @@ func (c *Config) Read() {
 
 	c.ServerType = conf.GetInt("server", "server_type", 0)
 	c.IgnoreSubPassword = conf.GetBool("server", "ignore_sub_password", false)
+	c.SpawnMobs = conf.GetBool("server", "spawn_mobs", true)
 
 	c.MasterIp = conf.GetString("master", "ip", "127.0.0.1")
 	c.MasterPort = conf.GetInt("master", "port", 9001)

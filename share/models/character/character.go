@@ -57,7 +57,7 @@ type Character struct {
 	Style     Style
 	LiveStyle int32 `db:"-"`
 	Alz       uint64
-	Nation    byte
+	Nation    byte   `db:"nation"`
 	SwordRank byte   `db:"sword_rank"`
 	MagicRank byte   `db:"magic_rank"`
 	CurrentHP uint16 `db:"current_hp"`

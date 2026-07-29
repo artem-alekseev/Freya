@@ -5,5 +5,6 @@ type MobHandler interface {
 	GetId() int
 	GetSpecies() int
 	GetHealth() (int, int)
+	SubHealth(hp int)
 	GetPosition() Position
 }

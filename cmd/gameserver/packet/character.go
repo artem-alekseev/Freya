@@ -6,6 +6,7 @@ import (
 	"github.com/ubis/Freya/cmd/gameserver/context"
 	"github.com/ubis/Freya/share/log"
 	"github.com/ubis/Freya/share/models/character"
+	"github.com/ubis/Freya/share/models/skills"
 	"github.com/ubis/Freya/share/models/subpasswd"
 	"github.com/ubis/Freya/share/network"
 	"github.com/ubis/Freya/share/rpc"
@@ -33,6 +34,20 @@ func NewTargetUser(session *network.Session, reader *network.Reader) {
 	packet.WriteInt16(maxHP)
 
 	session.Send(packet)
+}
+
+func EndTargetUser(session *network.Session, reader *network.Reader) {
+	sessionId := reader.ReadUint16()
+	pSession := g_NetworkManager.GetSession(sessionId)
+	ctx, err := context.Parse(pSession)
+	if err != nil {
+		log.Error(err.Error())
+		return
+	}
+
+	ctx.Mutex.RLock()
+	//currentHP, maxHP := ctx.Char.CurrentHP, ctx.Char.MaxHP
+	ctx.Mutex.RUnlock()
 }
 
 // GetMyChartr Packet
@@ -68,24 +83,26 @@ func GetMyChartr(session *network.Session, reader *network.Reader) {
 	packet.WriteInt32(resList.LastId)
 	packet.WriteInt32(resList.SlotOrder)
 
-	for i := 0; i < len(resList.List); i++ {
-		var char = resList.List[i]
-		packet.WriteInt32(char.Id)
-		packet.WriteInt64(char.Created.Unix())
-		packet.WriteUint32(char.Style.Get())
-		packet.WriteUint32(char.Level)
-		packet.WriteByte(char.SwordRank)
-		packet.WriteByte(char.MagicRank)
-		packet.WriteInt16(0x00) // padding for skill ranks
-		packet.WriteUint64(char.Alz)
-		packet.WriteByte(char.Nation)
-		packet.WriteByte(char.World)
-		packet.WriteUint16(char.X)
-		packet.WriteUint16(char.Y)
-		packet.WriteBytes(char.Equipment.SerializeKind())
-		packet.WriteBytes(make([]byte, 88))
-		packet.WriteByte(len(char.Name) + 1)
-		packet.WriteString(char.Name + "\x00")
+	if len(resList.List) > 0 {
+		for i := 0; i < len(resList.List); i++ {
+			var character = resList.List[i]
+			packet.WriteUint32(character.Id)
+			packet.WriteInt64(character.Created.Unix())
+			packet.WriteUint32(character.Style.Get())
+			packet.WriteUint32(character.Level) //LVL
+			packet.WriteByte(character.SwordRank)
+			packet.WriteByte(character.MagicRank)
+			packet.WriteUint16(0)
+			packet.WriteUint64(character.Alz)
+			packet.WriteByte(character.Nation)
+			packet.WriteByte(character.World)
+			packet.WriteUint16(character.X)
+			packet.WriteUint16(character.Y)
+			packet.WriteBytes(character.Equipment.SerializeKind())
+			packet.WriteBytes(make([]byte, 4))
+			packet.WriteByte(len(character.Name) + 1)
+			packet.WriteString(character.Name + "\x00")
+		}
 	}
 
 	session.Send(packet)
@@ -236,10 +253,11 @@ func notifyChangeStyle(session *network.Session) {
 }
 
 func ChangeStyle(session *network.Session, reader *network.Reader) {
-	_ = reader.ReadInt32() // style
-	liveStyle := reader.ReadInt32()
-	_ = reader.ReadInt32() // buffFlag?
-	_ = reader.ReadInt16() // actionFlag?
+	_ = reader.ReadInt32()          // style
+	liveStyle := reader.ReadInt32() //liveStyle
+	//guildNo := reader.ReadInt32()    // guildNo ?? 14 байт
+	//guildColor := reader.ReadInt32() // guildColor
+	//guildName := reader.ReadString(16) //guildName
 
 	ctx, err := context.Parse(session)
 	if err != nil {
@@ -297,6 +315,45 @@ func SkillToUser(session *network.Session, reader *network.Reader) {
 		// dash/fade & movement related
 		handleMoveSkill(session, reader)
 	}
+}
+
+func SkillToTarget(session *network.Session, reader *network.Reader) {
+	skill := reader.ReadUint16()
+	_ = reader.ReadByte() // slot
+	unk1 := reader.ReadInt16()
+	unk2 := reader.ReadInt32()
+
+	ctx, err := context.Parse(session)
+	if err != nil {
+		log.Error(err.Error())
+		return
+	}
+
+	ctx.Mutex.RLock()
+	id := ctx.Char.Id
+	mp := ctx.Char.CurrentMP
+	style := ctx.Char.Style.Get()
+	liveStyle := ctx.Char.LiveStyle
+	ctx.Mutex.RUnlock()
+
+	pkt := network.NewWriter(SKILLTOUSER)
+	pkt.WriteUint16(skill)
+	pkt.WriteUint16(mp)
+	pkt.WriteInt16(unk1)
+	pkt.WriteInt32(unk2)
+
+	session.Send(pkt)
+
+	pkt = network.NewWriter(NFY_SKILLTOUSER)
+	pkt.WriteUint16(skill)
+	pkt.WriteUint32(id)
+	pkt.WriteUint32(style)
+	pkt.WriteByte(liveStyle)
+	pkt.WriteByte(0x02)
+	pkt.WriteInt16(unk1)
+	pkt.WriteInt32(unk2)
+
+	ctx.World.BroadcastSessionPacket(session, pkt)
 }
 
 func handleStyleSkill(session *network.Session, reader *network.Reader) {
@@ -418,5 +475,87 @@ func SetPlayerLevel(session *network.Session, level int) {
 	}
 	pkt.WriteInt64(level)
 
+	session.Send(pkt)
+}
+
+func UpdateHelpInfo(session *network.Session, reader *network.Reader) {
+	_ = reader.ReadInt32() //helpIndex
+
+	pkt := network.NewWriter(UPDATE_HELPINFO)
+	pkt.WriteBool(true)
+
+	session.Send(pkt)
+}
+
+func UpgradeSkill(session *network.Session, reader *network.Reader) {
+	skillID := reader.ReadUint16()
+	upgraded := false
+
+	ctx, err := context.Parse(session)
+	if err != nil {
+		log.Error("[UPGRADE_SKILL]", err)
+	} else {
+		ctx.Mutex.Lock()
+
+		if ctx.Char == nil {
+			log.Error("[UPGRADE_SKILL] Character is not initialized")
+		} else {
+			var (
+				skill      skills.Skill
+				slot       uint16
+				matchCount int
+			)
+
+			for storedSlot, learnedSkill := range ctx.Char.Skills.List {
+				if learnedSkill.Id != skillID {
+					continue
+				}
+				if storedSlot < 0 || storedSlot > int(^uint16(0)) {
+					log.Errorf("[UPGRADE_SKILL] Skill %d has invalid slot %d for character %d", skillID, storedSlot, ctx.Char.Id)
+					continue
+				}
+
+				skill = learnedSkill
+				slot = uint16(storedSlot)
+				matchCount++
+			}
+
+			if matchCount == 0 {
+				log.Errorf("[UPGRADE_SKILL] Skill %d is not learned by character %d", skillID, ctx.Char.Id)
+			} else if matchCount > 1 {
+				log.Errorf("[UPGRADE_SKILL] Skill %d occurs in multiple slots for character %d", skillID, ctx.Char.Id)
+			} else if skill.Level == ^byte(0) {
+				log.Errorf("[UPGRADE_SKILL] Skill %d in slot %d is already at the highest representable level", skill.Id, slot)
+			} else {
+				previousLevel := skill.Level
+				skill.Level++
+				skill.Slot = slot
+
+				req := skills.SkillRequest{
+					Server:        byte(g_ServerSettings.ServerId),
+					Id:            ctx.Char.Id,
+					PreviousLevel: previousLevel,
+					Skill:         skill,
+				}
+				res := skills.SkillResponse{}
+
+				if err := g_RPCHandler.Call(rpc.SaveSkill, &req, &res); err != nil {
+					log.Errorf("[UPGRADE_SKILL] Unable to save skill %d in slot %d: %s", skill.Id, slot, err)
+				} else if !res.Result {
+					log.Errorf("[UPGRADE_SKILL] Skill %d in slot %d was not updated in the database", skill.Id, slot)
+				} else {
+					ctx.Char.Skills.Set(slot, skill)
+					upgraded = true
+					log.Infof("[UPGRADE_SKILL] Character %d upgraded skill %d in slot %d from level %d to %d",
+						ctx.Char.Id, skill.Id, slot, previousLevel, skill.Level)
+				}
+			}
+		}
+
+		ctx.Mutex.Unlock()
+	}
+
+	pkt := network.NewWriter(UPGRADE_SKILL)
+	pkt.WriteBool(upgraded)
 	session.Send(pkt)
 }
