@@ -110,3 +110,93 @@ func SaveSkill(c *rpc.Client, r *skills.SkillRequest, s *skills.SkillResponse) e
 	s.Result = rows == 1
 	return nil
 }
+
+// UntrainSkill atomically lowers or removes a skill and charges its Alz price.
+func UntrainSkill(_ *rpc.Client, r *skills.UntrainRequest, s *skills.UntrainResponse) error {
+	s.Result = false
+	if r.Character <= 0 || r.SkillID == 0 || r.PreviousLevel == 0 {
+		return errors.New("invalid untrain skill request")
+	}
+
+	db := g_DatabaseManager.Get(r.Server)
+	if db == nil {
+		return errors.New("game database is not configured")
+	}
+
+	tx, err := db.Beginx()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var alz uint64
+	if err := tx.Get(&alz, "SELECT alz FROM characters WHERE id = ? FOR UPDATE", r.Character); err != nil {
+		return err
+	}
+	s.Alz = alz
+	if alz < r.Price {
+		return nil
+	}
+
+	var level byte
+	err = tx.Get(&level,
+		"SELECT level FROM characters_skills "+
+			"WHERE id = ? AND skill = ? AND slot = ? FOR UPDATE",
+		r.Character, r.SkillID, r.Slot)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if level != r.PreviousLevel {
+		return nil
+	}
+
+	nextLevel := level - 1
+	var result sql.Result
+	if nextLevel == 0 {
+		result, err = tx.Exec(
+			"DELETE FROM characters_skills "+
+				"WHERE id = ? AND skill = ? AND slot = ? AND level = ?",
+			r.Character, r.SkillID, r.Slot, level)
+		if err == nil {
+			_, err = tx.Exec(
+				"DELETE FROM characters_quickslots WHERE id = ? AND skill = ?",
+				r.Character, r.SkillID)
+		}
+	} else {
+		result, err = tx.Exec(
+			"UPDATE characters_skills SET level = ? "+
+				"WHERE id = ? AND skill = ? AND slot = ? AND level = ?",
+			nextLevel, r.Character, r.SkillID, r.Slot, level)
+	}
+	if err != nil {
+		return err
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows != 1 {
+		return nil
+	}
+
+	if r.Price != 0 {
+		if _, err := tx.Exec(
+			"UPDATE characters SET alz = alz - ? WHERE id = ?",
+			r.Price, r.Character); err != nil {
+			return err
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
+	s.Result = true
+	s.Level = nextLevel
+	s.Alz = alz - r.Price
+	return nil
+}

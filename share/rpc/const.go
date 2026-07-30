@@ -49,6 +49,7 @@ const (
 const (
 	LearnSkill      = "LearnSkill"
 	SaveSkill       = "SaveSkill"
+	UntrainSkill    = "UntrainSkill"
 	QuickLinkSet    = "QuickLinkSet"
 	QuickLinkRemove = "QuickLinkRemove"
 	QuickLinkSwap   = "QuickLinkSwap"

@@ -3,6 +3,7 @@ package packet
 import (
 	"bytes"
 
+	"github.com/ubis/Freya/cmd/gameserver/clientdata"
 	"github.com/ubis/Freya/cmd/gameserver/context"
 	"github.com/ubis/Freya/share/log"
 	"github.com/ubis/Freya/share/models/character"
@@ -557,5 +558,74 @@ func UpgradeSkill(session *network.Session, reader *network.Reader) {
 
 	pkt := network.NewWriter(UPGRADE_SKILL)
 	pkt.WriteBool(upgraded)
+	session.Send(pkt)
+}
+
+func UntrainSkill(session *network.Session, reader *network.Reader) {
+	skillID := reader.ReadUint16()
+	slot := uint16(reader.ReadByte())
+	untrained := false
+
+	ctx, err := context.Parse(session)
+	if err != nil {
+		log.Error("[UNTRAIN_SKILL]", err)
+	} else {
+		ctx.Mutex.Lock()
+
+		if ctx.Char == nil {
+			log.Error("[UNTRAIN_SKILL] Character is not initialized")
+		} else {
+			skill := ctx.Char.Skills.Get(slot)
+			levelInfo, exists := clientdata.FindSkillLevel(skillID, skill.Level)
+
+			switch {
+			case skill.Id == 0:
+				log.Errorf("[UNTRAIN_SKILL] Slot %d is empty for character %d", slot, ctx.Char.Id)
+			case skill.Id != skillID:
+				log.Errorf("[UNTRAIN_SKILL] Skill %d does not match slot %d for character %d",
+					skillID, slot, ctx.Char.Id)
+			case skill.Level == 0:
+				log.Errorf("[UNTRAIN_SKILL] Skill %d in slot %d has an invalid level", skillID, slot)
+			case !exists:
+				log.Errorf("[UNTRAIN_SKILL] Missing client data for skill %d level %d", skillID, skill.Level)
+			case skill.Level == 1 && levelInfo.TrainType == clientdata.SkillTrainByQuest:
+				log.Errorf("[UNTRAIN_SKILL] Quest skill %d cannot be removed", skillID)
+			default:
+				previousLevel := skill.Level
+				req := skills.UntrainRequest{
+					Server:        byte(g_ServerSettings.ServerId),
+					Character:     ctx.Char.Id,
+					SkillID:       skillID,
+					Slot:          slot,
+					PreviousLevel: previousLevel,
+					Price:         levelInfo.UntrainPrice,
+				}
+				res := skills.UntrainResponse{}
+
+				if err := g_RPCHandler.Call(rpc.UntrainSkill, &req, &res); err != nil {
+					log.Errorf("[UNTRAIN_SKILL] Unable to save skill %d in slot %d: %s", skillID, slot, err)
+				} else if !res.Result {
+					log.Errorf("[UNTRAIN_SKILL] Skill %d in slot %d was not changed", skillID, slot)
+				} else {
+					ctx.Char.Alz = res.Alz
+					if res.Level == 0 {
+						ctx.Char.Skills.Remove(slot)
+						ctx.Char.Links.RemoveSkillLocal(skillID)
+					} else {
+						skill.Level = res.Level
+						ctx.Char.Skills.Set(slot, skill)
+					}
+					untrained = true
+					log.Infof("[UNTRAIN_SKILL] Character %d changed skill %d in slot %d from level %d to %d for %d Alz",
+						ctx.Char.Id, skillID, slot, previousLevel, res.Level, levelInfo.UntrainPrice)
+				}
+			}
+		}
+
+		ctx.Mutex.Unlock()
+	}
+
+	pkt := network.NewWriter(UNTRAIN_SKILL)
+	pkt.WriteBool(untrained)
 	session.Send(pkt)
 }

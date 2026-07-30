@@ -17,6 +17,8 @@ const (
 	skillBookPriceOffset = 327
 	skillBookSkillOffset = 339
 	skillBookItemType    = 77
+
+	SkillTrainByQuest byte = 11
 )
 
 type SkillBook struct {
@@ -29,10 +31,17 @@ type SkillBook struct {
 	Price   uint32
 }
 
+type SkillLevel struct {
+	UntrainPrice uint64
+	TrainType    byte
+}
+
 type Stats struct {
-	Worlds  int
-	Entries int
-	Books   int
+	Worlds      int
+	Entries     int
+	Books       int
+	SkillLevels int
+	ShopItems   int
 }
 
 type trainerKey struct {
@@ -42,6 +51,12 @@ type trainerKey struct {
 
 var skillBooks = make(map[trainerKey]map[uint16]SkillBook)
 var skillBooksByItem = make(map[uint32]SkillBook)
+var skillLevels = make(map[skillLevelKey]SkillLevel)
+
+type skillLevelKey struct {
+	skillID uint16
+	level   byte
+}
 
 func Initialize(directory string) (Stats, error) {
 	itemData, err := os.ReadFile(filepath.Join(directory, "item.dec"))
@@ -59,7 +74,11 @@ func Initialize(directory string) (Stats, error) {
 		return Stats{}, fmt.Errorf("read cabal.dec: %w", err)
 	}
 
-	loaded, stats, err := parseSkillBooks(cabalData, itemData, itemLayout)
+	loaded, levels, stats, err := parseSkillBooks(cabalData, itemData, itemLayout)
+	if err != nil {
+		return Stats{}, err
+	}
+	shops, err := parseShops(cabalData)
 	if err != nil {
 		return Stats{}, err
 	}
@@ -78,6 +97,9 @@ func Initialize(directory string) (Stats, error) {
 
 	skillBooks = loaded
 	skillBooksByItem = byItem
+	skillLevels = levels
+	shopItems = shops
+	stats.ShopItems = shopItemCount(shops)
 	return stats, nil
 }
 
@@ -94,6 +116,11 @@ func FindSkillBook(worldID, trainer byte, slot uint16) (SkillBook, bool) {
 func FindSkillBookItem(itemID uint32) (SkillBook, bool) {
 	book, ok := skillBooksByItem[itemID]
 	return book, ok
+}
+
+func FindSkillLevel(skillID uint16, level byte) (SkillLevel, bool) {
+	info, ok := skillLevels[skillLevelKey{skillID: skillID, level: level}]
+	return info, ok
 }
 
 type itemFileLayout struct {
@@ -119,15 +146,21 @@ func detectItemLayout(data []byte) (itemFileLayout, error) {
 	return layout, nil
 }
 
-func parseSkillBooks(cabalData, itemData []byte, layout itemFileLayout) (map[trainerKey]map[uint16]SkillBook, Stats, error) {
+func parseSkillBooks(cabalData, itemData []byte, layout itemFileLayout) (
+	map[trainerKey]map[uint16]SkillBook,
+	map[skillLevelKey]SkillLevel,
+	Stats,
+	error,
+) {
 	xmlStart := bytes.Index(cabalData, []byte("<cabal>"))
 	if xmlStart < 0 {
-		return nil, Stats{}, fmt.Errorf("cabal.dec does not contain a cabal XML section")
+		return nil, nil, Stats{}, fmt.Errorf("cabal.dec does not contain a cabal XML section")
 	}
 
 	decoder := xml.NewDecoder(bytes.NewReader(cabalData[xmlStart:]))
 	loaded := make(map[trainerKey]map[uint16]SkillBook)
 	uniqueBooks := make(map[uint32]struct{})
+	levels := make(map[skillLevelKey]SkillLevel)
 
 	var inCabalWorld bool
 	var worldID byte
@@ -139,19 +172,32 @@ func parseSkillBooks(cabalData, itemData []byte, layout itemFileLayout) (map[tra
 			break
 		}
 		if err != nil {
-			return nil, Stats{}, fmt.Errorf("parse cabal.dec XML: %w", err)
+			return nil, nil, Stats{}, fmt.Errorf("parse cabal.dec XML: %w", err)
 		}
 
 		switch element := token.(type) {
 		case xml.StartElement:
 			switch element.Name.Local {
+			case "skill_order":
+				skillID, startLevel, endLevel, info, err := parseSkillLevel(element)
+				if err != nil {
+					return nil, nil, Stats{}, err
+				}
+				for level := int(startLevel); level <= int(endLevel); level++ {
+					key := skillLevelKey{skillID: skillID, level: byte(level)}
+					if existing, ok := levels[key]; ok && existing != info {
+						return nil, nil, Stats{}, fmt.Errorf(
+							"conflicting skill order for skill %d level %d", skillID, level)
+					}
+					levels[key] = info
+				}
 			case "cabal_world":
 				inCabalWorld = true
 			case "world":
 				if inCabalWorld {
 					value, err := uintAttribute(element, "id", 8)
 					if err != nil {
-						return nil, Stats{}, err
+						return nil, nil, Stats{}, err
 					}
 					worldID = byte(value)
 				}
@@ -159,7 +205,7 @@ func parseSkillBooks(cabalData, itemData []byte, layout itemFileLayout) (map[tra
 				if inCabalWorld && worldID != 0 {
 					value, err := uintAttribute(element, "id", 8)
 					if err != nil {
-						return nil, Stats{}, err
+						return nil, nil, Stats{}, err
 					}
 					trainer = byte(value)
 				}
@@ -167,7 +213,7 @@ func parseSkillBooks(cabalData, itemData []byte, layout itemFileLayout) (map[tra
 				if inCabalWorld && worldID != 0 && trainer != 0 {
 					book, err := parseSkillBook(element, worldID, trainer, itemData, layout)
 					if err != nil {
-						return nil, Stats{}, err
+						return nil, nil, Stats{}, err
 					}
 
 					key := trainerKey{worldID: worldID, trainer: trainer}
@@ -175,7 +221,8 @@ func parseSkillBooks(cabalData, itemData []byte, layout itemFileLayout) (map[tra
 						loaded[key] = make(map[uint16]SkillBook)
 					}
 					if _, exists := loaded[key][book.Slot]; exists {
-						return nil, Stats{}, fmt.Errorf("duplicate trainer %d skill slot %d in world %d", trainer, book.Slot, worldID)
+						return nil, nil, Stats{}, fmt.Errorf(
+							"duplicate trainer %d skill slot %d in world %d", trainer, book.Slot, worldID)
 					}
 
 					loaded[key][book.Slot] = book
@@ -196,15 +243,50 @@ func parseSkillBooks(cabalData, itemData []byte, layout itemFileLayout) (map[tra
 		}
 	}
 
-	stats := Stats{Worlds: len(loaded), Books: len(uniqueBooks)}
+	stats := Stats{Worlds: len(loaded), Books: len(uniqueBooks), SkillLevels: len(levels)}
 	for _, books := range loaded {
 		stats.Entries += len(books)
 	}
 	if stats.Entries == 0 {
-		return nil, Stats{}, fmt.Errorf("cabal.dec does not contain trainer skill books")
+		return nil, nil, Stats{}, fmt.Errorf("cabal.dec does not contain trainer skill books")
+	}
+	if stats.SkillLevels == 0 {
+		return nil, nil, Stats{}, fmt.Errorf("cabal.dec does not contain skill orders")
 	}
 
-	return loaded, stats, nil
+	return loaded, levels, stats, nil
+}
+
+func parseSkillLevel(element xml.StartElement) (uint16, byte, byte, SkillLevel, error) {
+	skillID, err := uintAttribute(element, "id", 16)
+	if err != nil {
+		return 0, 0, 0, SkillLevel{}, err
+	}
+	startLevel, err := uintAttribute(element, "start_level", 8)
+	if err != nil {
+		return 0, 0, 0, SkillLevel{}, err
+	}
+	endLevel, err := uintAttribute(element, "end_level", 8)
+	if err != nil {
+		return 0, 0, 0, SkillLevel{}, err
+	}
+	trainType, err := uintAttribute(element, "train_type", 8)
+	if err != nil {
+		return 0, 0, 0, SkillLevel{}, err
+	}
+	untrainPrice, err := uintAttribute(element, "untrain_price", 64)
+	if err != nil {
+		return 0, 0, 0, SkillLevel{}, err
+	}
+	if skillID == 0 || startLevel == 0 || endLevel < startLevel {
+		return 0, 0, 0, SkillLevel{}, fmt.Errorf(
+			"invalid skill order for skill %d levels %d-%d", skillID, startLevel, endLevel)
+	}
+
+	return uint16(skillID), byte(startLevel), byte(endLevel), SkillLevel{
+		UntrainPrice: untrainPrice,
+		TrainType:    byte(trainType),
+	}, nil
 }
 
 func parseSkillBook(element xml.StartElement, worldID, trainer byte, itemData []byte, layout itemFileLayout) (SkillBook, error) {
@@ -267,6 +349,22 @@ func uintAttribute(element xml.StartElement, name string, bitSize int) (uint64, 
 		}
 
 		value, err := strconv.ParseUint(attribute.Value, 10, bitSize)
+		if err != nil {
+			return 0, fmt.Errorf("invalid %s attribute %q on <%s>: %w", name, attribute.Value, element.Name.Local, err)
+		}
+		return value, nil
+	}
+
+	return 0, fmt.Errorf("missing %s attribute on <%s>", name, element.Name.Local)
+}
+
+func intAttribute(element xml.StartElement, name string, bitSize int) (int64, error) {
+	for _, attribute := range element.Attr {
+		if attribute.Name.Local != name {
+			continue
+		}
+
+		value, err := strconv.ParseInt(attribute.Value, 10, bitSize)
 		if err != nil {
 			return 0, fmt.Errorf("invalid %s attribute %q on <%s>: %w", name, attribute.Value, element.Name.Local, err)
 		}

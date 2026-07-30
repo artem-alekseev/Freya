@@ -28,6 +28,7 @@ func RegisterPackets() {
 	pk.Register(QUICKLINKSWAP, "QuickLinkSwap", QuickLinkSwap)
 	pk.Register(GETSVRTIME, "GetSvrTime", GetSvrTime)
 	pk.Register(ITEMLOOTING, "ItemLooting", ItemLooting)
+	pk.Register(ITEMBUYINGS, "ItemBuyings", ItemBuyings)
 	pk.Register(ITEMSELLING, "ItemSelling", ItemSelling)
 	pk.Register(SKILLTOMOBS, "SkillToMobs", SkillToMobs)
 	pk.Register(SKILLTOUSER, "SkillToUser", SkillToUser)
@@ -90,6 +91,7 @@ func RegisterPackets() {
 	pk.Register(SET_CHAR_SLOT_ORDER, "SetCharacterSlotOrder", SetCharacterSlotOrder)
 	pk.Register(BUY_SKILL_BOOK, "BuySkillBook", BuySkillBook)
 	pk.Register(UPGRADE_SKILL, "UpgradeSkill", UpgradeSkill)
+	pk.Register(UNTRAIN_SKILL, "UntrainSkill", UntrainSkill)
 	pk.Register(CHANNEL_LIST, "ChannelList", ChannelList)
 	pk.Register(CHANNEL_CHANGE, "ChannelChange", ChannelChange)
 	pk.Register(CHAR_DEL_CHK_SUBPW,

@@ -47,6 +47,7 @@ func RegisterPackets() {
 
 	g_RPCHandler.Register(rpc.LearnSkill, LearnSkill)
 	g_RPCHandler.Register(rpc.SaveSkill, SaveSkill)
+	g_RPCHandler.Register(rpc.UntrainSkill, UntrainSkill)
 
 	g_RPCHandler.Register(rpc.QuickLinkSet, QuickLinkSet)
 	g_RPCHandler.Register(rpc.QuickLinkRemove, QuickLinkRemove)

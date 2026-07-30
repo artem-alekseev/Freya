@@ -308,6 +308,96 @@ func ItemSelling(session *network.Session, reader *network.Reader) {
 	session.Send(pkt)
 }
 
+func ItemBuyings(session *network.Session, reader *network.Reader) {
+	const (
+		itemBuyingSuccess         int32 = 0
+		itemBuyingFailByIndex     int32 = 1
+		itemBuyingFailByOperation int32 = 2
+		itemBuyingFailByAlz       int32 = 5
+	)
+
+	npcIndex := reader.ReadByte()
+	setIndex := reader.ReadInt32()
+	remoteShopSlot := reader.ReadInt32()
+	tradeCount := reader.ReadInt32()
+	inventorySlot := reader.ReadInt32()
+
+	result := itemBuyingFailByIndex
+	item := inventory.Item{}
+	if remoteShopSlot < 0 || tradeCount != 1 || inventorySlot < 0 || inventorySlot > int32(^uint16(0)) {
+		sendItemBuyingsResult(session, result, item)
+		return
+	}
+
+	ctx, err := context.Parse(session)
+	if err != nil {
+		log.Errorf("[ITEMBUYINGS] %s", err)
+		sendItemBuyingsResult(session, itemBuyingFailByOperation, item)
+		return
+	}
+
+	ctx.Mutex.RLock()
+	if ctx.Char == nil || ctx.Char.Inventory == nil {
+		ctx.Mutex.RUnlock()
+		sendItemBuyingsResult(session, itemBuyingFailByOperation, item)
+		return
+	}
+	worldID := ctx.Char.World
+	characterID := ctx.Char.Id
+	characterAlz := ctx.Char.Alz
+	characterInventory := ctx.Char.Inventory
+	ctx.Mutex.RUnlock()
+
+	shopItem, exists := clientdata.FindShopItem(worldID, npcIndex, setIndex)
+	if !exists || shopItem.ItemID == 0 || shopItem.Price == 0 {
+		log.Warningf("[ITEMBUYINGS] Unknown shop item: character %d, world %d, NPC %d, slot %d",
+			characterID, worldID, npcIndex, setIndex)
+		sendItemBuyingsResult(session, result, item)
+		return
+	}
+
+	item = inventory.Item{
+		Kind:   shopItem.ItemID,
+		Option: shopItem.Option,
+		Slot:   uint16(inventorySlot),
+	}
+
+	purchased, alz, err := characterInventory.Purchase(item, shopItem.Price)
+	if err != nil {
+		log.Errorf("[ITEMBUYINGS] Unable to buy item %d for character %d: %s", item.Kind, characterID, err)
+		sendItemBuyingsResult(session, itemBuyingFailByOperation, inventory.Item{})
+		return
+	}
+	if !purchased {
+		if alz < shopItem.Price || characterAlz < shopItem.Price {
+			result = itemBuyingFailByAlz
+		} else {
+			result = itemBuyingFailByOperation
+		}
+		sendItemBuyingsResult(session, result, inventory.Item{})
+		return
+	}
+
+	ctx.Mutex.Lock()
+	ctx.Char.Alz = alz
+	ctx.Mutex.Unlock()
+
+	log.Infof("[ITEMBUYINGS] Character %d bought item %d from NPC %d for %d Alz in slot %d",
+		characterID, item.Kind, npcIndex, shopItem.Price, item.Slot)
+	sendItemBuyingsResult(session, itemBuyingSuccess, item)
+}
+
+func sendItemBuyingsResult(session *network.Session, result int32, item inventory.Item) {
+	pkt := network.NewWriter(ITEMBUYINGS)
+	pkt.WriteInt32(result)
+	pkt.WriteUint32(item.Kind)
+	pkt.WriteUint32(item.Serials)
+	pkt.WriteInt32(item.Option)
+	pkt.WriteUint16(item.Slot)
+	pkt.WriteUint32(item.Expire)
+	session.Send(pkt)
+}
+
 func BuySkillBook(session *network.Session, reader *network.Reader) {
 	npcIndex := reader.ReadByte()
 	setIndex := reader.ReadUint16()

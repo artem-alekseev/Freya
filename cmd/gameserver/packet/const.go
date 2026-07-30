@@ -13,6 +13,7 @@ const (
 	QUICKLINKSWAP         = 147
 	GETSVRTIME            = 148
 	ITEMLOOTING           = 153
+	ITEMBUYINGS           = 161
 	ITEMSELLING           = 162
 	SKILLTOMOBS           = 174
 	SKILLTOUSER           = 175
@@ -75,6 +76,7 @@ const (
 	SET_CHAR_SLOT_ORDER   = 2001
 	BUY_SKILL_BOOK        = 2003
 	UPGRADE_SKILL         = 270
+	UNTRAIN_SKILL         = 271
 	CHANNEL_LIST          = 2112
 	CHANNEL_CHANGE        = 2141
 	CHAR_DEL_CHK_SUBPW    = 2160

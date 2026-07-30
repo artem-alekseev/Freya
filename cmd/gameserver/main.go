@@ -31,7 +31,7 @@ func main() {
 		log.Fatal("Unable to load client data: ", err.Error())
 		return
 	}
-	log.Infof("Loaded %d skill books in %d trainer catalogs from client DEC files", stats.Books, stats.Worlds)
+	log.Infof("Loaded %d skill books and %d NPC shop items from client DEC files", stats.Books, stats.ShopItems)
 
 	game := &game.WorldManager{SpawnMobs: g_ServerConfig.SpawnMobs}
 	game.Initialize()

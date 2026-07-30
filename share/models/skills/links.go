@@ -143,6 +143,22 @@ func (e *Links) Remove(slot uint16) (bool, error) {
 	return ok, err
 }
 
+// RemoveSkillLocal mirrors quick links removed atomically by the UntrainSkill RPC.
+func (e *Links) RemoveSkillLocal(skill uint16) {
+	if e == nil {
+		return
+	}
+
+	e.mutex.Lock()
+	defer e.mutex.Unlock()
+
+	for slot, link := range e.List {
+		if link.Skill == skill {
+			delete(e.List, slot)
+		}
+	}
+}
+
 // Serializes skill link list into byte array
 func (e *Links) Serialize() ([]byte, int) {
 	e.mutex.Lock()

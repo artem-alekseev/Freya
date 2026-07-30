@@ -18,3 +18,18 @@ type LearnRequest struct {
 	ItemID        uint32
 	Skill         Skill
 }
+
+type UntrainRequest struct {
+	Server        byte
+	Character     int32
+	SkillID       uint16
+	Slot          uint16
+	PreviousLevel byte
+	Price         uint64
+}
+
+type UntrainResponse struct {
+	Result bool
+	Level  byte
+	Alz    uint64
+}
