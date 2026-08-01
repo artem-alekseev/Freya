@@ -8,15 +8,24 @@ import (
 )
 
 func QuickLinkSet(c *rpc.Client, r *skills.QuickLinkRequest, s *skills.QuickLinkResponse) error {
-	var db = g_DatabaseManager.Get(r.Server)
-
 	s.Result = false
+	if r == nil || r.NewLink == nil {
+		return errors.New("new link is not set")
+	}
 
-	_, err := db.MustExec(
+	var db = g_DatabaseManager.Get(r.Server)
+	if db == nil {
+		return errors.New("game database is not configured")
+	}
+
+	// A quick-link slot is unique per character. Insert it when the slot is
+	// empty, otherwise replace the skill assigned to the existing slot.
+	_, err := db.Exec(
 		"INSERT INTO characters_quickslots "+
 			"(id, skill, slot) "+
-			"VALUES (?, ?, ?)",
-		r.Id, r.NewLink.Skill, r.NewLink.Slot).RowsAffected()
+			"VALUES (?, ?, ?) "+
+			"ON DUPLICATE KEY UPDATE skill = ?",
+		r.Id, r.NewLink.Skill, r.NewLink.Slot, r.NewLink.Skill)
 	if err != nil {
 		return err
 	}

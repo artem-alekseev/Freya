@@ -164,7 +164,7 @@ func NewItemSingle(item context.ItemHandler, dropped bool) *network.Writer {
 	// however, if we would send owner id everytime - the same drop animation
 	// would appear in-game, and to not have this, id of -1 is sent instead
 	if dropped {
-		pkt.WriteInt32(item.GetOwner())
+		pkt.WriteInt32(item.GetSource())
 	} else {
 		pkt.WriteInt32(-1)
 	}
@@ -175,8 +175,8 @@ func NewItemSingle(item context.ItemHandler, dropped bool) *network.Writer {
 	pkt.WriteUint16(x)
 	pkt.WriteUint16(y)
 	pkt.WriteUint16(item.GetKey())
-	pkt.WriteByte(0x02) // type
-	pkt.WriteByte(0x06) // unk
+	pkt.WriteByte(item.GetDropType())
+	pkt.WriteByte(item.GetDropInfo())
 
 	return pkt
 }
@@ -197,8 +197,8 @@ func NewItemList(items []context.ItemHandler) *network.Writer {
 		pkt.WriteUint16(x)
 		pkt.WriteUint16(y)
 		pkt.WriteUint16(i.GetKey())
-		pkt.WriteByte(0x02) // type
-		pkt.WriteByte(0x06) // unk
+		pkt.WriteByte(i.GetDropType())
+		pkt.WriteByte(i.GetDropInfo())
 
 	}
 

@@ -13,6 +13,7 @@ func NewMobsList(mobs []context.MobHandler) *network.Writer {
 	for _, v := range mobs {
 		id := v.GetId()
 		species := v.GetSpecies()
+		currentHP, maxHP := v.GetHealth()
 		pos := v.GetPosition()
 
 		pkt.WriteInt32(id)
@@ -21,8 +22,8 @@ func NewMobsList(mobs []context.MobHandler) *network.Writer {
 		pkt.WriteInt16(pos.FinalX)
 		pkt.WriteInt16(pos.FinalY)
 		pkt.WriteInt16(species)
-		pkt.WriteInt32(0xF3) //max hp
-		pkt.WriteInt32(0xF3) // current hp
+		pkt.WriteInt32(maxHP)
+		pkt.WriteInt32(currentHP)
 		pkt.WriteByte(0)
 		pkt.WriteInt32(9) // level
 		pkt.WriteInt32(0)

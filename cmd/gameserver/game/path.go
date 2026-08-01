@@ -24,6 +24,7 @@ func OpenDeadReckoning(pos *context.Position) {
 	pos.Distance, pos.Sin, pos.Cos =
 		computeDSC(pos.InitialX, pos.InitialY, pos.FinalX, pos.FinalY)
 
+	pos.Base = 0
 	pos.IsMoving = true
 	pos.IsDeadReckoning = true
 	pos.MoveBegin = time.Now().UnixMilli()

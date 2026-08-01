@@ -1,8 +1,12 @@
 package game
 
 import (
+	"sync"
+
 	"github.com/ubis/Freya/cmd/gameserver/context"
 	"github.com/ubis/Freya/share/log"
+	"github.com/ubis/Freya/share/models/drop"
+	"github.com/ubis/Freya/share/network"
 )
 
 // WorldManager manages world maps and their data
@@ -14,6 +18,36 @@ type WorldManager struct {
 		Warps []context.Warp
 	}
 	Mobs []*Mob
+
+	dropMutex sync.RWMutex
+	dropList  map[uint32][]drop.Entry
+}
+
+// SetDropList replaces the in-memory copy of the database-backed drop list.
+func (wm *WorldManager) SetDropList(entries []drop.Entry) {
+	bySpecies := make(map[uint32][]drop.Entry)
+	for _, entry := range entries {
+		if entry.MobSpecies == 0 || entry.ItemKind == 0 || entry.Amount == 0 ||
+			entry.ChanceBPS == 0 || entry.ChanceBPS > 10000 {
+			continue
+		}
+
+		bySpecies[entry.MobSpecies] = append(bySpecies[entry.MobSpecies], entry)
+	}
+
+	wm.dropMutex.Lock()
+	wm.dropList = bySpecies
+	wm.dropMutex.Unlock()
+}
+
+// GetDropList returns a copy so callers can roll drops without holding the
+// manager lock or mutating the shared rule set.
+func (wm *WorldManager) GetDropList(species uint32) []drop.Entry {
+	wm.dropMutex.RLock()
+	entries := wm.dropList[species]
+	result := append([]drop.Entry(nil), entries...)
+	wm.dropMutex.RUnlock()
+	return result
 }
 
 // Initialize loads worlds, their data and initializes worlds.
@@ -63,6 +97,13 @@ func (wm *WorldManager) FindWorld(id byte) context.WorldHandler {
 	}
 
 	return nil
+}
+
+// BroadcastAllPacket sends a packet to every player on every loaded map.
+func (wm *WorldManager) BroadcastAllPacket(pkt *network.Writer) {
+	for _, world := range wm.Worlds {
+		world.BroadcastAllPacket(pkt)
+	}
 }
 
 // GetWarps returns a slice of warps for a specific world.

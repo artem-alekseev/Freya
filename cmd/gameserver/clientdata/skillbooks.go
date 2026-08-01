@@ -14,7 +14,8 @@ import (
 const (
 	itemNameOffset       = 64
 	itemTypeOffset       = 204
-	skillBookPriceOffset = 327
+	itemSellPriceOffset  = 327
+	skillBookPriceOffset = itemSellPriceOffset
 	skillBookSkillOffset = 339
 	skillBookItemType    = 77
 
@@ -37,11 +38,12 @@ type SkillLevel struct {
 }
 
 type Stats struct {
-	Worlds      int
-	Entries     int
-	Books       int
-	SkillLevels int
-	ShopItems   int
+	Worlds          int
+	Entries         int
+	Books           int
+	SkillLevels     int
+	CharacterLevels int
+	ShopItems       int
 }
 
 type trainerKey struct {
@@ -52,6 +54,12 @@ type trainerKey struct {
 var skillBooks = make(map[trainerKey]map[uint16]SkillBook)
 var skillBooksByItem = make(map[uint32]SkillBook)
 var skillLevels = make(map[skillLevelKey]SkillLevel)
+var itemSellData = make(map[uint32]itemSellInfo)
+
+type itemSellInfo struct {
+	price    uint64
+	itemType uint32
+}
 
 type skillLevelKey struct {
 	skillID uint16
@@ -68,10 +76,26 @@ func Initialize(directory string) (Stats, error) {
 	if err != nil {
 		return Stats{}, err
 	}
+	sellData, err := parseItemSellPrices(itemData, itemLayout)
+	if err != nil {
+		return Stats{}, err
+	}
 
 	cabalData, err := os.ReadFile(filepath.Join(directory, "cabal.dec"))
 	if err != nil {
 		return Stats{}, fmt.Errorf("read cabal.dec: %w", err)
+	}
+	damageData, err := parseSkillDamageData(cabalData)
+	if err != nil {
+		return Stats{}, err
+	}
+	weaponUpgradeFormulas, err := parseWeaponUpgradeFormulas(cabalData)
+	if err != nil {
+		return Stats{}, err
+	}
+	parsedWeaponData := parseWeaponAttackData(itemData, itemLayout, weaponUpgradeFormulas)
+	if len(parsedWeaponData) == 0 {
+		return Stats{}, fmt.Errorf("item.dec does not contain weapon attack values")
 	}
 
 	loaded, levels, stats, err := parseSkillBooks(cabalData, itemData, itemLayout)
@@ -79,6 +103,18 @@ func Initialize(directory string) (Stats, error) {
 		return Stats{}, err
 	}
 	shops, err := parseShops(cabalData)
+	if err != nil {
+		return Stats{}, err
+	}
+	levelsTable, err := parseCharacterLevels(cabalData)
+	if err != nil {
+		return Stats{}, err
+	}
+	rankProgress, rankBonuses, err := parseSkillRankData(cabalData)
+	if err != nil {
+		return Stats{}, err
+	}
+	battleModeSkills, err := parseBattleModeSkills(cabalData)
 	if err != nil {
 		return Stats{}, err
 	}
@@ -98,7 +134,17 @@ func Initialize(directory string) (Stats, error) {
 	skillBooks = loaded
 	skillBooksByItem = byItem
 	skillLevels = levels
+	skillDamageData = damageData
+	itemSellData = sellData
+	if len(parsedWeaponData) > 0 {
+		weaponAttackData = parsedWeaponData
+	}
+	characterLevels = levelsTable
+	skillRankProgressData = rankProgress
+	skillRankBonusData = rankBonuses
+	battleModeSkillData = battleModeSkills
 	shopItems = shops
+	stats.CharacterLevels = len(levelsTable)
 	stats.ShopItems = shopItemCount(shops)
 	return stats, nil
 }
@@ -116,6 +162,34 @@ func FindSkillBook(worldID, trainer byte, slot uint16) (SkillBook, bool) {
 func FindSkillBookItem(itemID uint32) (SkillBook, bool) {
 	book, ok := skillBooksByItem[itemID]
 	return book, ok
+}
+
+func FindItemSellPrice(itemID uint32) (uint64, bool) {
+	data, ok := itemSellData[itemID&0x0000FFFF]
+	return data.price, ok
+}
+
+func FindItemSellValue(itemID uint32, itemOption int32) (uint64, bool) {
+	data, ok := itemSellData[itemID&0x0000FFFF]
+	if !ok || data.price == 0 {
+		return 0, false
+	}
+
+	count := uint64(1)
+	switch data.itemType {
+	case 16, 27, 102: // QSTS, SPOS, FCTL: count is in the low 16 bits.
+		count = uint64(uint32(itemOption) & 0xFFFF)
+	case 67, 70: // EVTS, FONT: count is also kept in the low option bits.
+		count = uint64(uint32(itemOption) & 0xFFFF)
+	case 13, 15, 42, 46, 60, 71, 76, 80, 81, 83, 87, 88, 93, 95, 96:
+		// Other stackable types use the complete item option as their count.
+		count = uint64(uint32(itemOption))
+	}
+	if count == 0 || ^uint64(0)/data.price < count {
+		return 0, false
+	}
+
+	return data.price * count, true
 }
 
 func FindSkillLevel(skillID uint16, level byte) (SkillLevel, bool) {
@@ -144,6 +218,27 @@ func detectItemLayout(data []byte) (itemFileLayout, error) {
 	}
 
 	return layout, nil
+}
+
+func parseItemSellPrices(data []byte, layout itemFileLayout) (map[uint32]itemSellInfo, error) {
+	prices := make(map[uint32]itemSellInfo)
+	for itemID, recordStart := uint32(1), layout.headerSize; recordStart+layout.recordSize <= len(data); itemID, recordStart = itemID+1, recordStart+layout.recordSize {
+		priceOffset := recordStart + itemSellPriceOffset
+		if priceOffset+4 > recordStart+layout.recordSize {
+			return nil, fmt.Errorf("item %d record does not contain sell price", itemID)
+		}
+
+		price := binary.LittleEndian.Uint32(data[priceOffset : priceOffset+4])
+		if price != 0 {
+			itemType := binary.LittleEndian.Uint32(data[recordStart+itemTypeOffset : recordStart+itemTypeOffset+4])
+			prices[itemID] = itemSellInfo{price: uint64(price), itemType: itemType}
+		}
+	}
+
+	if len(prices) == 0 {
+		return nil, fmt.Errorf("item.dec does not contain item sell prices")
+	}
+	return prices, nil
 }
 
 func parseSkillBooks(cabalData, itemData []byte, layout itemFileLayout) (

@@ -48,35 +48,41 @@ type SetOrderRes struct {
 }
 
 type Character struct {
-	Id        int32
-	Name      string
-	Level     uint16
-	World     byte
-	X         byte
-	Y         byte
-	Style     Style
-	LiveStyle int32 `db:"-"`
-	Alz       uint64
-	Nation    byte   `db:"nation"`
-	SwordRank byte   `db:"sword_rank"`
-	MagicRank byte   `db:"magic_rank"`
-	CurrentHP uint16 `db:"current_hp"`
-	MaxHP     uint16 `db:"max_hp"`
-	CurrentMP uint16 `db:"current_mp"`
-	MaxMP     uint16 `db:"max_mp"`
-	CurrentSP uint16 `db:"current_sp"`
-	MaxSP     uint16 `db:"max_sp"`
-	STR       uint32 `db:"str_stat"`
-	INT       uint32 `db:"int_stat"`
-	DEX       uint32 `db:"dex_stat"`
-	PNT       uint32 `db:"pnt_stat"`
-	Exp       uint64
-	WarExp    uint64 `db:"war_exp"`
-	Equipment inventory.Equipment
-	Inventory *inventory.Inventory
-	Skills    skills.SkillList
-	Links     *skills.Links
-	Created   time.Time
+	Id           int32
+	Name         string
+	Level        uint16
+	World        byte
+	X            byte
+	Y            byte
+	Style        Style
+	LiveStyle    int32 `db:"-"`
+	Alz          uint64
+	Nation       byte   `db:"nation"`
+	SwordRank    byte   `db:"sword_rank"`
+	MagicRank    byte   `db:"magic_rank"`
+	SwordExp     uint16 `db:"sword_exp"`
+	MagicExp     uint16 `db:"magic_exp"`
+	SwordPoint   uint16 `db:"sword_point"`
+	MagicPoint   uint16 `db:"magic_point"`
+	SwordRankExp uint16 `db:"sword_rank_exp"`
+	MagicRankExp uint16 `db:"magic_rank_exp"`
+	CurrentHP    uint16 `db:"current_hp"`
+	MaxHP        uint16 `db:"max_hp"`
+	CurrentMP    uint16 `db:"current_mp"`
+	MaxMP        uint16 `db:"max_mp"`
+	CurrentSP    uint16 `db:"current_sp"`
+	MaxSP        uint16 `db:"max_sp"`
+	STR          uint32 `db:"str_stat"`
+	INT          uint32 `db:"int_stat"`
+	DEX          uint32 `db:"dex_stat"`
+	PNT          uint32 `db:"pnt_stat"`
+	Exp          uint64
+	WarExp       uint64 `db:"war_exp"`
+	Equipment    inventory.Equipment
+	Inventory    *inventory.Inventory
+	Skills       skills.SkillList
+	Links        *skills.Links
+	Created      time.Time
 
 	// movement data
 	BeginX int16 `db:"-"`
@@ -92,6 +98,104 @@ type DataReq struct {
 
 type DataRes struct {
 	Inventory inventory.Inventory
+	Warehouse inventory.Inventory
 	Skills    skills.SkillList
 	Links     skills.Links
+}
+
+type ExperienceReq struct {
+	Server        byte
+	Character     int32
+	ExpectedExp   uint64
+	ExpectedLevel uint16
+	Exp           uint64
+	Level         uint16
+	StatPoints    uint32
+	CurrentHP     uint16
+	MaxHP         uint16
+	CurrentMP     uint16
+	MaxMP         uint16
+}
+
+type ExperienceRes struct {
+	Result bool
+}
+
+type SkillExperienceReq struct {
+	Server               byte
+	Character            int32
+	ExpectedSwordRank    byte
+	ExpectedMagicRank    byte
+	ExpectedSwordExp     uint16
+	ExpectedMagicExp     uint16
+	ExpectedSwordPoint   uint16
+	ExpectedMagicPoint   uint16
+	ExpectedSwordRankExp uint16
+	ExpectedMagicRankExp uint16
+	ExpectedSTR          uint32
+	ExpectedDEX          uint32
+	ExpectedINT          uint32
+	ExpectedCurrentHP    uint16
+	ExpectedMaxHP        uint16
+	ExpectedCurrentMP    uint16
+	ExpectedMaxMP        uint16
+	SwordRank            byte
+	MagicRank            byte
+	SwordExp             uint16
+	MagicExp             uint16
+	SwordPoint           uint16
+	MagicPoint           uint16
+	SwordRankExp         uint16
+	MagicRankExp         uint16
+	STR                  uint32
+	DEX                  uint32
+	INT                  uint32
+	CurrentHP            uint16
+	MaxHP                uint16
+	CurrentMP            uint16
+	MaxMP                uint16
+}
+
+type SkillExperienceRes struct {
+	Result bool
+}
+
+type StatRequest struct {
+	Server      byte
+	Character   int32
+	Stat        byte
+	ExpectedPNT uint32
+}
+
+type StatResponse struct {
+	Result bool
+	STR    uint32
+	DEX    uint32
+	INT    uint32
+	PNT    uint32
+}
+
+type VitalsRequest struct {
+	Server    byte
+	Character int32
+	CurrentHP uint16
+	MaxHP     uint16
+	CurrentMP uint16
+	MaxMP     uint16
+}
+
+type VitalsResponse struct {
+	Result bool
+}
+
+type PositionReq struct {
+	Server    byte
+	Character int32
+	World     byte
+	X         byte
+	Y         byte
+}
+
+type PositionRes struct {
+	Result bool
 }

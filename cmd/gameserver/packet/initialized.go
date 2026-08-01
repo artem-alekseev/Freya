@@ -65,6 +65,12 @@ func Initialized(session *network.Session, reader *network.Reader) {
 		return
 	}
 
+	hpChanged := c.RecalculateHP()
+	mpChanged := c.RecalculateMP()
+	if hpChanged || mpChanged {
+		saveCharacterVitals(&c)
+	}
+
 	// load additional character data
 	req := character.DataReq{
 		Server: byte(g_ServerSettings.ServerId),
@@ -72,6 +78,9 @@ func Initialized(session *network.Session, reader *network.Reader) {
 	}
 	res := character.DataRes{}
 	g_RPCHandler.Call(rpc.LoadCharacterData, req, &res)
+	if err := ensureBattleModeSkillsForCharacter(c.Id, c.Level, c.Style.BattleStyle, &res.Skills); err != nil {
+		log.Errorf("Unable to grant battle mode skills for character %d: %s", c.Id, err)
+	}
 
 	// serialize data
 	eq, eqlen := c.Equipment.Serialize()
@@ -117,12 +126,12 @@ func Initialized(session *network.Session, reader *network.Reader) {
 	pkt.WriteUint16(c.CurrentSP) // +
 	pkt.WriteUint16(0x00)        //stats.DungeonPoints)
 	pkt.WriteUint16(0x00)
-	pkt.WriteUint16(500)  //stats.SwordExp)+
-	pkt.WriteUint16(1)    //stats.SwordPoint)+
-	pkt.WriteUint16(1000) //stats.MagicExp)+
-	pkt.WriteUint16(1)    //stats.MagicPoint)+
-	pkt.WriteUint16(0x01) //stats.SwordExpPoint)+
-	pkt.WriteUint16(0x01) //stats.MagicExpPoint)+
+	pkt.WriteUint16(c.SwordExp)     // stats.SwordExp
+	pkt.WriteUint16(c.SwordPoint)   // stats.SwordPoint
+	pkt.WriteUint16(c.MagicExp)     // stats.MagicExp
+	pkt.WriteUint16(c.MagicPoint)   // stats.MagicPoint
+	pkt.WriteUint16(c.SwordRankExp) // stats.SwordExpPoint
+	pkt.WriteUint16(c.MagicRankExp) // stats.MagicExpPoint
 	pkt.WriteUint16(4)
 	pkt.WriteUint16(4)
 	pkt.WriteUint16(4)
@@ -230,6 +239,7 @@ func Initialized(session *network.Session, reader *network.Reader) {
 
 	ctx.Mutex.Lock()
 	ctx.Char = &c
+	ctx.Warehouse = res.Warehouse
 	worldManager := ctx.WorldManager
 	ctx.Mutex.Unlock()
 
@@ -254,6 +264,11 @@ func Uninitialze(session *network.Session, reader *network.Reader) {
 	_ = reader.ReadByte()   // map id
 	_ = reader.ReadByte()   // log out
 
+	SaveCharacterPosition(session)
+	// The character list is reused while the TCP session remains connected.
+	// Force the next Initialized packet to load the just-saved coordinates.
+	session.Data.CharacterList = nil
+
 	world := context.GetWorld(session)
 	if world == nil {
 		log.Error("Unable to get current world!")
@@ -276,11 +291,26 @@ func Uninitialze(session *network.Session, reader *network.Reader) {
 
 // MessageEvnt Packet
 func MessageEvnt(session *network.Session, reader *network.Reader) {
-	unk1 := reader.ReadInt16()
-	msglen := reader.ReadInt16()
+	_ = reader.ReadUint16()
+	msglen := reader.ReadUint16()
 	_ = reader.ReadInt16()
-	mtype := reader.ReadByte() // 0xA0 = normal; 0xA1 = trade; 0xA4 = roll dice
-	msg := reader.ReadString(int(msglen) - 3)
+	_ = reader.ReadByte() // client message type
+
+	const messageHeaderSize = 10
+	const messageFieldsSize = 7 // data length, message length, reserved, message type
+	if msglen < 3 {
+		log.Errorf("Invalid MessageEvnt length: %d", msglen)
+		return
+	}
+
+	textLen := int(msglen) - 3
+	available := int(reader.Size) - messageHeaderSize - messageFieldsSize
+	if textLen > available {
+		log.Errorf("Invalid MessageEvnt payload: text=%d available=%d packet=%d", textLen, available, reader.Size)
+		return
+	}
+
+	msg := reader.ReadString(textLen)
 
 	if strings.HasPrefix(msg, "#") {
 		parts := strings.Split(msg, " ")
@@ -300,28 +330,10 @@ func MessageEvnt(session *network.Session, reader *network.Reader) {
 		return
 	}
 
-	id, err := context.GetCharId(session)
-	if err != nil {
-		log.Error(err.Error())
-		return
+	pkt := SendMessage(session, msg)
+	if pkt != nil {
+		world.BroadcastSessionPacket(session, pkt)
 	}
-
-	pkt := network.NewWriter(NFY_MESSAGEEVNT)
-	pkt.WriteUint32(id)
-	pkt.WriteByte(0) // 0x03 = [GM] prefix
-	pkt.WriteByte(unk1)
-	pkt.WriteByte(0)
-	pkt.WriteByte(len(msg) + 3)
-	pkt.WriteByte(0)
-	pkt.WriteByte(254)
-	pkt.WriteByte(254)
-	pkt.WriteByte(mtype) // 0xA0 = normal; trade = 0xA1
-	pkt.WriteString(msg)
-	pkt.WriteByte(0)
-	pkt.WriteByte(0)
-	pkt.WriteByte(0)
-
-	world.BroadcastSessionPacket(session, pkt)
 }
 
 // WarpCommand packet
@@ -388,6 +400,7 @@ func WarpCommand(session *network.Session, reader *network.Reader) {
 	ctx.Mutex.Unlock()
 
 	newWorld.EnterWorld(session)
+	SaveCharacterPosition(session)
 }
 
 func fillPlayerInfo(pkt *network.Writer, session *network.Session) {
@@ -490,31 +503,5 @@ func DelUserList(session *network.Session, reason server.DelUserType) *network.W
 }
 
 func SendMessage(session *network.Session, msg string) *network.Writer {
-	id, err := context.GetCharId(session)
-	if err != nil {
-		log.Error(err.Error())
-		return nil
-	}
-
-	pkt := network.NewWriter(NFY_MESSAGEEVNT)
-	pkt.WriteInt32(id)
-	pkt.WriteByte(0) // 0x03 = [GM] prefix
-	pkt.WriteByte(0x3F)
-	pkt.WriteByte(0)
-	pkt.WriteByte(len(msg) + 3)
-	pkt.WriteByte(0)
-	pkt.WriteByte(254)
-	pkt.WriteByte(254)
-
-	// normal = 0xA0;
-	// trade  = 0xA1;
-	// sys msg(right side) = 0xA3;
-	// roll dice = 0xA4
-	pkt.WriteByte(0xA4)
-	pkt.WriteString(msg)
-	pkt.WriteByte(0)
-	pkt.WriteByte(0)
-	pkt.WriteByte(0)
-
-	return pkt
+	return SystemMessgEx(msg)
 }

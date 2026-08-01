@@ -47,6 +47,12 @@ CREATE TABLE `characters` (
   `nation` tinyint(3) UNSIGNED NOT NULL DEFAULT '0',
   `sword_rank` tinyint(3) UNSIGNED NOT NULL DEFAULT '1',
   `magic_rank` tinyint(3) UNSIGNED NOT NULL DEFAULT '1',
+  `sword_exp` smallint(5) UNSIGNED NOT NULL DEFAULT '0',
+  `magic_exp` smallint(5) UNSIGNED NOT NULL DEFAULT '0',
+  `sword_point` smallint(5) UNSIGNED NOT NULL DEFAULT '0',
+  `magic_point` smallint(5) UNSIGNED NOT NULL DEFAULT '0',
+  `sword_rank_exp` smallint(5) UNSIGNED NOT NULL DEFAULT '0',
+  `magic_rank_exp` smallint(5) UNSIGNED NOT NULL DEFAULT '0',
   `current_hp` smallint(5) UNSIGNED NOT NULL,
   `max_hp` smallint(5) UNSIGNED NOT NULL,
   `current_mp` smallint(5) UNSIGNED NOT NULL,
@@ -90,6 +96,40 @@ CREATE TABLE `characters_inventory` (
   `opt` int(10) UNSIGNED NOT NULL,
   `slot` smallint(5) UNSIGNED NOT NULL,
   `expire` int(10) UNSIGNED NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=latin1 ROW_FORMAT=COMPACT;
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `characters_warehouse`
+--
+
+CREATE TABLE `characters_warehouse` (
+  `id` int(11) NOT NULL,
+  `kind` int(10) UNSIGNED NOT NULL,
+  `serials` int(10) UNSIGNED NOT NULL,
+  `opt` int(10) UNSIGNED NOT NULL,
+  `slot` smallint(5) UNSIGNED NOT NULL,
+  `expire` int(10) UNSIGNED NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=latin1 ROW_FORMAT=COMPACT;
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `mob_drop_list`
+--
+
+CREATE TABLE `mob_drop_list` (
+  `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT,
+  `mob_species` int(10) UNSIGNED NOT NULL,
+  `item_kind` int(10) UNSIGNED NOT NULL,
+  `item_option` int(11) NOT NULL DEFAULT '0',
+  `amount` smallint(5) UNSIGNED NOT NULL DEFAULT '1',
+  `chance_bps` smallint(5) UNSIGNED NOT NULL DEFAULT '10000',
+  `enabled` tinyint(1) NOT NULL DEFAULT '1',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_mob_drop_rule` (`mob_species`,`item_kind`,`item_option`,`amount`,`chance_bps`),
+  KEY `idx_mob_drop_species` (`mob_species`,`enabled`)
 ) ENGINE=InnoDB DEFAULT CHARSET=latin1 ROW_FORMAT=COMPACT;
 
 -- --------------------------------------------------------
@@ -152,6 +192,12 @@ ALTER TABLE `characters_inventory`
   ADD PRIMARY KEY (`id`,`slot`);
 
 --
+-- Indexes for table `characters_warehouse`
+--
+ALTER TABLE `characters_warehouse`
+  ADD PRIMARY KEY (`id`,`slot`);
+
+--
 -- Indexes for table `characters_quickslots`
 --
 ALTER TABLE `characters_quickslots`
@@ -186,6 +232,12 @@ ALTER TABLE `characters_inventory`
   ADD CONSTRAINT `characters_inventory_ibfk_1` FOREIGN KEY (`id`) REFERENCES `characters` (`id`);
 
 --
+-- Constraints for table `characters_warehouse`
+--
+ALTER TABLE `characters_warehouse`
+  ADD CONSTRAINT `characters_warehouse_ibfk_1` FOREIGN KEY (`id`) REFERENCES `characters` (`id`);
+
+--
 -- Constraints for table `characters_quickslots`
 --
 ALTER TABLE `characters_quickslots`
@@ -196,6 +248,45 @@ ALTER TABLE `characters_quickslots`
 --
 ALTER TABLE `characters_skills`
   ADD CONSTRAINT `characters_skills_ibfk_1` FOREIGN KEY (`id`) REFERENCES `characters` (`id`);
+
+-- Test warehouse items for character 16. The SELECT keeps a fresh database
+-- import valid when character 16 has not been created yet.
+INSERT IGNORE INTO `characters_warehouse`
+  (`id`, `kind`, `serials`, `opt`, `slot`, `expire`)
+SELECT 16, 3, 0, 5, 0, 0 FROM `characters` WHERE `id` = 16;
+
+INSERT IGNORE INTO `characters_warehouse`
+  (`id`, `kind`, `serials`, `opt`, `slot`, `expire`)
+SELECT 16, 6, 0, 20, 1, 0 FROM `characters` WHERE `id` = 16;
+
+INSERT IGNORE INTO `characters_warehouse`
+  (`id`, `kind`, `serials`, `opt`, `slot`, `expire`)
+SELECT 16, 12, 0, 5, 2, 0 FROM `characters` WHERE `id` = 16;
+
+INSERT IGNORE INTO `characters_inventory`
+  (`id`, `kind`, `serials`, `opt`, `slot`, `expire`)
+SELECT 16, 659, 0, 13107220, 0, 0 FROM `characters` WHERE `id` = 16;
+
+-- Test drop rule: mob species 63 always drops a stack of five HP potions.
+INSERT INTO `mob_drop_list`
+  (`mob_species`, `item_kind`, `item_option`, `amount`, `chance_bps`, `enabled`)
+VALUES (63, 3, 0, 5, 10000, 1)
+ON DUPLICATE KEY UPDATE `enabled` = VALUES(`enabled`);
+
+-- Red Garli (mob 51): small and medium Upgrade Core, 50% each.
+INSERT INTO `mob_drop_list`
+  (`mob_species`, `item_kind`, `item_option`, `amount`, `chance_bps`, `enabled`)
+VALUES (51, 9, 0, 1, 5000, 1)
+ON DUPLICATE KEY UPDATE `enabled` = VALUES(`enabled`);
+
+INSERT INTO `mob_drop_list`
+  (`mob_species`, `item_kind`, `item_option`, `amount`, `chance_bps`, `enabled`)
+VALUES (51, 10, 0, 1, 5000, 1)
+ON DUPLICATE KEY UPDATE `enabled` = VALUES(`enabled`);
+
+UPDATE `characters`
+SET `pnt_stat` = GREATEST(`pnt_stat`, 20)
+WHERE `id` = 16;
 COMMIT;
 
 /*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;

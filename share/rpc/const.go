@@ -24,11 +24,17 @@ const (
 
 // Character related RPC's
 const (
-	LoadCharacters    = "LoadCharacters"
-	CreateCharacter   = "CreateCharacter"
-	DeleteCharacter   = "DeleteCharacter"
-	SetSlotOrder      = "SetSlotOrder"
-	LoadCharacterData = "LoadCharacterData"
+	LoadCharacters      = "LoadCharacters"
+	CreateCharacter     = "CreateCharacter"
+	DeleteCharacter     = "DeleteCharacter"
+	SetSlotOrder        = "SetSlotOrder"
+	LoadCharacterData   = "LoadCharacterData"
+	SaveExperience      = "SaveExperience"
+	SaveSkillExperience = "SaveSkillExperience"
+	SaveStat            = "SaveStat"
+	SaveVitals          = "SaveVitals"
+	SavePosition        = "SavePosition"
+	LoadMobDropList     = "LoadMobDropList"
 )
 
 // Inventory related RPC's
@@ -39,18 +45,22 @@ const (
 	MoveEquipmentItem = "MoveEquipmentItem"
 	AddItem           = "AddItem"
 	PurchaseItem      = "PurchaseItem"
+	SellItems         = "SellItems"
 	StackItem         = "StackItem"
 	RemoveItem        = "RemoveItem"
 	SwapItem          = "SwapItem"
 	MoveItem          = "MoveItem"
+	StorageMove       = "StorageMove"
+	EnchantItem       = "EnchantItem"
 )
 
 // Skill related RPC's
 const (
-	LearnSkill      = "LearnSkill"
-	SaveSkill       = "SaveSkill"
-	UntrainSkill    = "UntrainSkill"
-	QuickLinkSet    = "QuickLinkSet"
-	QuickLinkRemove = "QuickLinkRemove"
-	QuickLinkSwap   = "QuickLinkSwap"
+	LearnSkill            = "LearnSkill"
+	SaveSkill             = "SaveSkill"
+	UntrainSkill          = "UntrainSkill"
+	GrantBattleModeSkills = "GrantBattleModeSkills"
+	QuickLinkSet          = "QuickLinkSet"
+	QuickLinkRemove       = "QuickLinkRemove"
+	QuickLinkSwap         = "QuickLinkSwap"
 )

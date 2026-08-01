@@ -76,6 +76,149 @@ func LearnSkill(_ *rpc.Client, r *skills.LearnRequest, s *skills.SkillResponse) 
 	return nil
 }
 
+const (
+	battleModeSkillSlotMin uint16 = 70
+	battleModeSkillSlotMax uint16 = 76
+)
+
+func isBattleModeSkillSlot(slot uint16) bool {
+	return slot >= battleModeSkillSlotMin && slot <= battleModeSkillSlotMax
+}
+
+// GrantBattleModeSkills reconciles mastery skills with their reserved
+// client slots. It also repairs rows created earlier with an incorrect slot.
+func GrantBattleModeSkills(_ *rpc.Client, r *skills.GrantBattleModeSkillsRequest, s *skills.GrantBattleModeSkillsResponse) error {
+	s.Result = false
+	s.Added = nil
+	s.Removed = nil
+	if r == nil || r.Character <= 0 {
+		return errors.New("invalid battle mode skill request")
+	}
+
+	db := g_DatabaseManager.Get(r.Server)
+	if db == nil {
+		return errors.New("game database is not configured")
+	}
+
+	tx, err := db.Beginx()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	desiredBySlot := make(map[uint16]uint16, len(r.Skills))
+	for _, skill := range r.Skills {
+		if skill.Id == 0 || skill.Level == 0 || !isBattleModeSkillSlot(skill.Slot) {
+			return errors.New("invalid battle mode skill")
+		}
+		if previous, exists := desiredBySlot[skill.Slot]; exists && previous != skill.Id {
+			return errors.New("duplicate battle mode skill slot")
+		}
+		desiredBySlot[skill.Slot] = skill.Id
+	}
+
+	var existingSkills []skills.Skill
+	if err := tx.Select(&existingSkills,
+		"SELECT skill, level, slot FROM characters_skills "+
+			"WHERE id = ? AND slot BETWEEN ? AND ? FOR UPDATE",
+		r.Character, battleModeSkillSlotMin, battleModeSkillSlotMax); err != nil {
+		return err
+	}
+	for _, existing := range existingSkills {
+		if desiredID, exists := desiredBySlot[existing.Slot]; exists && desiredID == existing.Id {
+			continue
+		}
+		if _, err := tx.Exec(
+			"DELETE FROM characters_skills WHERE id = ? AND slot = ?",
+			r.Character, existing.Slot); err != nil {
+			return err
+		}
+		s.Removed = append(s.Removed, existing.Slot)
+	}
+
+	for _, skill := range r.Skills {
+
+		var existing skills.Skill
+		err = tx.Get(&existing,
+			"SELECT skill, level, slot FROM characters_skills WHERE id = ? AND skill = ? LIMIT 1 FOR UPDATE",
+			r.Character, skill.Id)
+		if err == nil {
+			if existing.Slot == skill.Slot {
+				continue
+			}
+
+			if !isBattleModeSkillSlot(skill.Slot) {
+				continue
+			}
+
+			var target skills.Skill
+			err = tx.Get(&target,
+				"SELECT skill, level, slot FROM characters_skills WHERE id = ? AND slot = ? FOR UPDATE",
+				r.Character, skill.Slot)
+			if err == nil && target.Id != skill.Id {
+				if _, err := tx.Exec(
+					"DELETE FROM characters_skills WHERE id = ? AND slot = ?",
+					r.Character, skill.Slot); err != nil {
+					return err
+				}
+			} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
+				return err
+			}
+
+			result, err := tx.Exec(
+				"UPDATE characters_skills SET slot = ? WHERE id = ? AND skill = ? AND slot = ?",
+				skill.Slot, r.Character, skill.Id, existing.Slot)
+			if err != nil {
+				return err
+			}
+			rows, err := result.RowsAffected()
+			if err != nil {
+				return err
+			}
+			if rows == 1 {
+				s.Added = append(s.Added, skills.Skill{
+					Id:    skill.Id,
+					Level: existing.Level,
+					Slot:  skill.Slot,
+				})
+			}
+			continue
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+
+		err = tx.Get(&existing,
+			"SELECT skill, level, slot FROM characters_skills WHERE id = ? AND slot = ? FOR UPDATE",
+			r.Character, skill.Slot)
+		if err == nil {
+			if !isBattleModeSkillSlot(skill.Slot) {
+				continue
+			}
+			if _, err := tx.Exec(
+				"DELETE FROM characters_skills WHERE id = ? AND slot = ?",
+				r.Character, skill.Slot); err != nil {
+				return err
+			}
+		} else if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+
+		if _, err := tx.Exec(
+			"INSERT INTO characters_skills (id, skill, level, slot) VALUES (?, ?, ?, ?)",
+			r.Character, skill.Id, skill.Level, skill.Slot); err != nil {
+			return err
+		}
+		s.Added = append(s.Added, skill)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	s.Result = true
+	return nil
+}
+
 // SaveSkill updates an existing character skill using optimistic locking.
 func SaveSkill(c *rpc.Client, r *skills.SkillRequest, s *skills.SkillResponse) error {
 	s.Result = false

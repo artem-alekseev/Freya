@@ -1,6 +1,7 @@
 package rpc
 
 import (
+	"database/sql"
 	"errors"
 
 	"github.com/ubis/Freya/share/models/inventory"
@@ -188,6 +189,82 @@ func PurchaseItem(_ *rpc.Client, r *inventory.PurchaseRequest, s *inventory.Purc
 	return nil
 }
 
+func SellItems(_ *rpc.Client, r *inventory.SellRequest, s *inventory.SellResponse) error {
+	if r == nil || r.Character <= 0 {
+		return errors.New("invalid sell request")
+	}
+
+	db := g_DatabaseManager.Get(r.Server)
+	s.Result = false
+	if r.Price == 0 || len(r.Items) == 0 {
+		return nil
+	}
+
+	tx, err := db.Beginx()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var alz uint64
+	if err := tx.Get(&alz, "SELECT alz FROM characters WHERE id = ? FOR UPDATE", r.Character); err != nil {
+		return err
+	}
+	s.Alz = alz
+	if ^uint64(0)-alz < r.Price {
+		return nil
+	}
+
+	seenSlots := make(map[uint16]struct{}, len(r.Items))
+	for _, item := range r.Items {
+		if item.Kind == 0 {
+			return nil
+		}
+		if _, exists := seenSlots[item.Slot]; exists {
+			return nil
+		}
+		seenSlots[item.Slot] = struct{}{}
+
+		var stored inventory.Item
+		if err := tx.Get(&stored,
+			"SELECT kind, serials, opt, slot, expire FROM characters_inventory "+
+				"WHERE id = ? AND slot = ? AND kind = ? AND serials = ? AND opt = ? AND expire = ? FOR UPDATE",
+			r.Character, item.Slot, item.Kind, item.Serials, item.Option, item.Expire); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil
+			}
+			return err
+		}
+
+		result, err := tx.Exec(
+			"DELETE FROM characters_inventory WHERE id = ? AND slot = ? AND kind = ? AND serials = ? AND opt = ? AND expire = ?",
+			r.Character, item.Slot, item.Kind, item.Serials, item.Option, item.Expire)
+		if err != nil {
+			return err
+		}
+		rows, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if rows != 1 {
+			return nil
+		}
+	}
+
+	newAlz := alz + r.Price
+	if _, err := tx.Exec("UPDATE characters SET alz = ? WHERE id = ?", newAlz, r.Character); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
+	s.Result = true
+	s.Alz = newAlz
+	return nil
+}
+
 func StackItem(c *rpc.Client, r *inventory.ItemRequest, s *inventory.ItemResponse) error {
 	var db = g_DatabaseManager.Get(r.Server)
 
@@ -298,4 +375,115 @@ func MoveItem(c *rpc.Client, r *inventory.ItemRequest, s *inventory.ItemResponse
 	s.Result = true
 
 	return nil
+}
+
+func StorageMove(_ *rpc.Client, r *inventory.StorageMoveRequest, s *inventory.StorageMoveResponse) error {
+	s.Result = false
+	if r == nil || r.Character <= 0 {
+		return errors.New("invalid storage move request")
+	}
+
+	sourceTable, ok := storageTable(r.SourceType)
+	if !ok {
+		return errors.New("invalid source storage type")
+	}
+	targetTable, ok := storageTable(r.TargetType)
+	if !ok {
+		return errors.New("invalid target storage type")
+	}
+
+	db := g_DatabaseManager.Get(r.Server)
+	if db == nil {
+		return errors.New("game database is not configured")
+	}
+
+	if r.SourceType == r.TargetType && r.SourceSlot == r.TargetSlot {
+		s.Result = true
+		return nil
+	}
+
+	tx, err := db.Beginx()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var item inventory.Item
+	if err = tx.Get(&item,
+		"SELECT kind, serials, opt, slot, expire FROM "+sourceTable+
+			" WHERE id = ? AND slot = ? FOR UPDATE",
+		r.Character, r.SourceSlot); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		return err
+	}
+
+	var occupied int
+	if err = tx.Get(&occupied,
+		"SELECT COUNT(*) FROM "+targetTable+" WHERE id = ? AND slot = ?",
+		r.Character, r.TargetSlot); err != nil {
+		return err
+	}
+	if occupied != 0 {
+		return nil
+	}
+
+	if sourceTable == targetTable {
+		result, err := tx.Exec(
+			"UPDATE "+sourceTable+" SET slot = ? WHERE id = ? AND slot = ?",
+			r.TargetSlot, r.Character, r.SourceSlot)
+		if err != nil {
+			return err
+		}
+
+		rows, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if rows != 1 {
+			return nil
+		}
+	} else {
+		item.Slot = r.TargetSlot
+		if _, err = tx.Exec(
+			"INSERT INTO "+targetTable+
+				" (id, kind, serials, opt, slot, expire) VALUES (?, ?, ?, ?, ?, ?)",
+			r.Character, item.Kind, item.Serials, item.Option, item.Slot, item.Expire); err != nil {
+			return err
+		}
+
+		result, err := tx.Exec(
+			"DELETE FROM "+sourceTable+" WHERE id = ? AND slot = ?",
+			r.Character, r.SourceSlot)
+		if err != nil {
+			return err
+		}
+
+		rows, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if rows != 1 {
+			return errors.New("source storage item disappeared during move")
+		}
+	}
+
+	if err = tx.Commit(); err != nil {
+		return err
+	}
+
+	s.Result = true
+	return nil
+}
+
+func storageTable(storageType byte) (string, bool) {
+	switch storageType {
+	case 0:
+		return "characters_inventory", true
+	case 2:
+		return "characters_warehouse", true
+	default:
+		return "", false
+	}
 }

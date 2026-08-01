@@ -16,6 +16,9 @@ type Item struct {
 	Id          int32
 	Key         uint16
 	Owner       int32
+	Source      int32
+	DropType    byte
+	DropInfo    byte
 	X           uint16
 	Y           uint16
 	Item        *inventory.Item
@@ -24,11 +27,14 @@ type Item struct {
 	Expire      time.Duration
 }
 
-func NewItem(item *inventory.Item, id, owner int32, x, y int, ownerExpire bool) *Item {
+func NewItem(item *inventory.Item, id, owner, source int32, x, y int, ownerExpire bool, dropType, dropInfo byte) *Item {
 	return &Item{
 		Id:          id,
 		Key:         uint16(rand.Intn(65536)),
 		Owner:       owner,
+		Source:      source,
+		DropType:    dropType,
+		DropInfo:    dropInfo,
 		X:           uint16(x),
 		Y:           uint16(y),
 		Item:        item,
@@ -52,6 +58,18 @@ func (i *Item) GetOwner() int32 {
 	return i.Owner
 }
 
+func (i *Item) GetSource() int32 {
+	return i.Source
+}
+
+func (i *Item) GetDropType() byte {
+	return i.DropType
+}
+
+func (i *Item) GetDropInfo() byte {
+	return i.DropInfo
+}
+
 func (i *Item) GetKind() uint32 {
 	return i.Item.Kind
 }
@@ -69,5 +87,9 @@ func (i *Item) GetKey() uint16 {
 }
 
 func (i *Item) IsOwnerExpired() bool {
+	if !i.OwnerExpire {
+		return true
+	}
+
 	return time.Now().After(i.Created.Add(itemOwnerExpire))
 }

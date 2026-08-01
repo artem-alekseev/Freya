@@ -9,6 +9,7 @@ import (
 	gamepacket "github.com/ubis/Freya/cmd/gameserver/packet"
 	"github.com/ubis/Freya/share/event"
 	"github.com/ubis/Freya/share/log"
+	"github.com/ubis/Freya/share/models/drop"
 	"github.com/ubis/Freya/share/models/server"
 	"github.com/ubis/Freya/share/network"
 	"github.com/ubis/Freya/share/rpc"
@@ -25,7 +26,9 @@ func RegisterEvents(wm *game.WorldManager) {
 	event.Register(event.ClientDisconnectEvent, event.Handler(OnClientDisconnect))
 	event.Register(event.PacketReceiveEvent, event.Handler(OnPacketReceive))
 	event.Register(event.PacketSendEvent, event.Handler(OnPacketSend))
-	event.Register(event.SyncConnectEvent, event.Handler(OnSyncConnect))
+	event.Register(event.SyncConnectEvent, event.Handler(func(e *event.Event) {
+		OnSyncConnect(e, wm)
+	}))
 	event.Register(event.SyncDisconnectEvent, event.Handler(OnSyncDisconnect))
 }
 
@@ -56,6 +59,10 @@ func OnClientDisconnect(e *event.Event) {
 	if !ok {
 		return
 	}
+
+	// Save coordinates before removing the player from the world. The context
+	// keeps the last position even when the client disconnects unexpectedly.
+	gamepacket.SaveCharacterPosition(s)
 
 	// in case client was in the world, notify other players
 	world := context.GetWorld(s)
@@ -116,7 +123,7 @@ func OnPacketSend(e *event.Event) {
 }
 
 // OnSyncConnect event informs server about successful connection with the Master Server
-func OnSyncConnect(event *event.Event) {
+func OnSyncConnect(_ *event.Event, wm *game.WorldManager) {
 	log.Info("Established connection with the Master Server!")
 
 	// register this server
@@ -134,6 +141,15 @@ func OnSyncConnect(event *event.Event) {
 	res := server.RegisterRes{}
 
 	g_RPCHandler.Call(rpc.ServerRegister, &req, &res)
+
+	dropReq := drop.ListRequest{Server: byte(g_ServerSettings.ServerId)}
+	dropRes := drop.ListResponse{}
+	if err := g_RPCHandler.Call(rpc.LoadMobDropList, &dropReq, &dropRes); err != nil {
+		log.Errorf("Unable to load mob drop list: %s", err)
+		return
+	}
+	wm.SetDropList(dropRes.Entries)
+	log.Infof("Loaded %d mob drop rules", len(dropRes.Entries))
 }
 
 // OnSyncDisconnect event informs server about lost connection with the Master Server

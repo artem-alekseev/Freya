@@ -5,13 +5,15 @@ import (
 	"sync"
 
 	"github.com/ubis/Freya/share/models/character"
+	"github.com/ubis/Freya/share/models/inventory"
 	"github.com/ubis/Freya/share/network"
 )
 
 // Context holds information related to the player's current context within the game.
 type Context struct {
-	Mutex sync.RWMutex
-	Char  *character.Character
+	Mutex     sync.RWMutex
+	Char      *character.Character
+	Warehouse inventory.Inventory
 
 	Cell         CellHandler
 	World        WorldHandler

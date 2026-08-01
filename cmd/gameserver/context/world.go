@@ -21,6 +21,7 @@ type WorldHandler interface {
 	ExitWorld(session *network.Session, reason server.DelUserType)
 	AdjustCell(session *network.Session)
 	BroadcastSessionPacket(session *network.Session, pkt *network.Writer)
+	BroadcastAllPacket(pkt *network.Writer)
 	FindWarp(warp byte) *Warp
 	IsMovable(x, y int) bool
 	DropItem(item *inventory.Item, owner int32, x, y int) bool
@@ -33,6 +34,7 @@ type WorldHandler interface {
 // WorldManagerHandler defines the interface for interacting with a world manager.
 type WorldManagerHandler interface {
 	FindWorld(id byte) WorldHandler
+	BroadcastAllPacket(pkt *network.Writer)
 	GetWarps(world byte) []Warp
 }
 

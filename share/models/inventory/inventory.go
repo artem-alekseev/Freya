@@ -101,6 +101,51 @@ func (e *Inventory) Purchase(item Item, price uint64) (bool, uint64, error) {
 	return true, res.Alz, nil
 }
 
+// Sell atomically removes the selected items and credits their price before
+// updating the in-memory inventory.
+func (e *Inventory) Sell(items []Item, price uint64) (bool, uint64, error) {
+	e.mutex.Lock()
+	defer e.mutex.Unlock()
+
+	if len(items) == 0 || price == 0 {
+		return false, 0, nil
+	}
+	if e.rpcHandler == nil {
+		return false, 0, errors.New("rpc handler is not ready")
+	}
+
+	seenSlots := make(map[uint16]struct{}, len(items))
+	for _, item := range items {
+		stored, exists := e.Inv[int(item.Slot)]
+		if !exists || stored != item {
+			return false, 0, errors.New("inventory item changed before selling")
+		}
+		if _, exists := seenSlots[item.Slot]; exists {
+			return false, 0, errors.New("inventory slot is listed more than once")
+		}
+		seenSlots[item.Slot] = struct{}{}
+	}
+
+	req := SellRequest{
+		Server:    e.serverId,
+		Character: e.character,
+		Items:     items,
+		Price:     price,
+	}
+	res := SellResponse{}
+	if err := e.rpcHandler.Call(rpc.SellItems, &req, &res); err != nil {
+		return false, 0, err
+	}
+	if !res.Result {
+		return false, res.Alz, nil
+	}
+
+	for _, item := range items {
+		delete(e.Inv, int(item.Slot))
+	}
+	return true, res.Alz, nil
+}
+
 // ConsumeSkillBook atomically removes a skill book from persistent inventory
 // and inserts the learned skill before updating the in-memory inventory.
 func (e *Inventory) ConsumeSkillBook(slot uint16, itemID uint32, skill skills.Skill) (bool, error) {
@@ -164,6 +209,27 @@ func (e *Inventory) Get(slot uint16) Item {
 	return Item{}
 }
 
+// SetLocal updates an item after a transaction has already been persisted by
+// the Master Server. It intentionally skips the regular inventory RPC.
+func (e *Inventory) SetLocal(item Item) {
+	e.mutex.Lock()
+	defer e.mutex.Unlock()
+
+	if e.Inv == nil {
+		e.Inv = make(map[int]Item)
+	}
+	e.Inv[int(item.Slot)] = item
+}
+
+// RemoveLocal removes an item after a transaction has already been persisted
+// by the Master Server. It intentionally skips the regular inventory RPC.
+func (e *Inventory) RemoveLocal(slot uint16) {
+	e.mutex.Lock()
+	defer e.mutex.Unlock()
+
+	delete(e.Inv, int(slot))
+}
+
 // Removes inventory item by slot
 func (e *Inventory) Remove(slot uint16) (bool, error) {
 	e.mutex.Lock()
@@ -180,6 +246,65 @@ func (e *Inventory) Remove(slot uint16) (bool, error) {
 	}
 
 	return ok, err
+}
+
+// Enchant atomically persists the new target kind and removes the consumed
+// core items before updating the in-memory inventory.
+func (e *Inventory) Enchant(targetSlot uint16, newKind uint32, coreSlots []uint16) (bool, error) {
+	e.mutex.Lock()
+	defer e.mutex.Unlock()
+
+	target, exists := e.Inv[int(targetSlot)]
+	if !exists || target.Kind == 0 {
+		return false, errors.New("target item does not exist in the inventory")
+	}
+	if newKind == 0 || len(coreSlots) == 0 {
+		return false, errors.New("invalid enchant request")
+	}
+	if e.rpcHandler == nil {
+		return false, errors.New("rpc handler is not ready")
+	}
+
+	cores := make([]Item, 0, len(coreSlots))
+	seen := make(map[uint16]struct{}, len(coreSlots))
+	for _, slot := range coreSlots {
+		if slot == targetSlot {
+			return false, errors.New("target item cannot also be a core")
+		}
+		if _, exists := seen[slot]; exists {
+			return false, errors.New("enchant core slot is listed more than once")
+		}
+		seen[slot] = struct{}{}
+
+		core, exists := e.Inv[int(slot)]
+		if !exists || core.Kind == 0 {
+			return false, errors.New("enchant core does not exist in the inventory")
+		}
+		cores = append(cores, core)
+	}
+
+	req := EnchantRequest{
+		Server:    e.serverId,
+		Character: e.character,
+		Target:    target,
+		NewKind:   newKind,
+		Cores:     cores,
+	}
+	res := EnchantResponse{}
+	if err := e.rpcHandler.Call(rpc.EnchantItem, &req, &res); err != nil {
+		return false, err
+	}
+	if !res.Result {
+		return false, nil
+	}
+
+	target.Kind = newKind
+	e.Inv[int(targetSlot)] = target
+	for _, core := range cores {
+		delete(e.Inv, int(core.Slot))
+	}
+
+	return true, nil
 }
 
 // Removes inventory item by slot

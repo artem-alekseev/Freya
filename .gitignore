@@ -12,6 +12,8 @@ cfg/*
 
 ## Ignore decoded client data
 enc/
+WorldSvr
+docs
 
 ## Ignore macOS FS files
 .DS_Store

@@ -1,6 +1,7 @@
 package game
 
 import (
+	"math/rand"
 	"time"
 
 	"github.com/ubis/Freya/cmd/gameserver/context"
@@ -365,6 +366,10 @@ func (w *World) AdjustCell(session *network.Session) {
 
 	// add player to the new cell
 	newCell.AddPlayer(session)
+
+	// Persist the position after a successful cell transition. This keeps the
+	// last safe cell in the database even if the GameServer crashes later.
+	packet.SaveCharacterPosition(session)
 }
 
 // BroadcastPacket broadcasts a packet to nearby cells.
@@ -383,6 +388,14 @@ func (w *World) BroadcastSessionPacket(session *network.Session, pkt *network.Wr
 
 	column, row := cell.GetId()
 	w.BroadcastPacket(column, row, pkt)
+}
+
+// BroadcastAllPacket sends a packet to every player on this map.
+func (w *World) BroadcastAllPacket(pkt *network.Writer) {
+	w.iterateCells(func(_, _ byte, cell *Cell) bool {
+		cell.Send(pkt)
+		return false
+	})
 }
 
 // FindWarp finds a specific warp based on its ID.
@@ -410,6 +423,50 @@ func (w *World) IsMovable(x, y int) bool {
 }
 
 func (w *World) DropItem(item *inventory.Item, owner int32, x, y int) bool {
+	return w.dropItem(item, owner, owner, x, y, owner != 0, 2, 0x06)
+}
+
+func (w *World) DropMobItem(item *inventory.Item, mobID int32, x, y int) bool {
+	return w.dropItem(item, 0, mobID, x, y, false, 1, 0x04)
+}
+
+// DropMobItems rolls the database-backed drop list for a dead mob species.
+// Each configured entry is an independent roll, so one mob may drop zero or
+// several items.
+func (w *World) DropMobItems(species uint32, mobID int32, x, y int) int {
+	if w == nil || w.manager == nil {
+		return 0
+	}
+
+	dropped := 0
+	for _, entry := range w.manager.GetDropList(species) {
+		if rand.Intn(10000) >= int(entry.ChanceBPS) {
+			continue
+		}
+
+		amount := entry.Amount
+		if amount == 0 {
+			amount = 1
+		}
+		option := entry.ItemOption
+		if amount > 1 {
+			// The current client protocol stores a stack amount in Item.Option.
+			option = int32(amount)
+		}
+
+		item := inventory.Item{
+			Kind:   entry.ItemKind,
+			Option: option,
+		}
+		if w.DropMobItem(&item, mobID, x, y) {
+			dropped++
+		}
+	}
+
+	return dropped
+}
+
+func (w *World) dropItem(item *inventory.Item, owner, source int32, x, y int, ownerExpire bool, dropType, dropInfo byte) bool {
 	cell := w.getWorldCell(x, y)
 	if cell == nil {
 		return false
@@ -424,7 +481,7 @@ func (w *World) DropItem(item *inventory.Item, owner int32, x, y int) bool {
 
 	id++
 
-	i := NewItem(item, id, owner, x, y, true)
+	i := NewItem(item, id, owner, source, x, y, ownerExpire, dropType, dropInfo)
 
 	pkt := packet.NewItemSingle(i, true)
 	column, row := cell.GetId()
@@ -442,6 +499,10 @@ func (w *World) PeekItem(id int32, key uint16) context.ItemHandler {
 		item = c.FindItem(id)
 		return item != nil && item.GetKey() == key
 	})
+
+	if item == nil {
+		return nil
+	}
 
 	return item
 }

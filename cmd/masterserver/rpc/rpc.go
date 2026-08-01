@@ -32,6 +32,12 @@ func RegisterPackets() {
 	g_RPCHandler.Register(rpc.DeleteCharacter, DeleteCharacter)
 	g_RPCHandler.Register(rpc.SetSlotOrder, SetSlotOrder)
 	g_RPCHandler.Register(rpc.LoadCharacterData, LoadCharacterData)
+	g_RPCHandler.Register(rpc.SaveExperience, SaveExperience)
+	g_RPCHandler.Register(rpc.SaveSkillExperience, SaveSkillExperience)
+	g_RPCHandler.Register(rpc.SaveStat, SaveStat)
+	g_RPCHandler.Register(rpc.SaveVitals, SaveVitals)
+	g_RPCHandler.Register(rpc.SavePosition, SavePosition)
+	g_RPCHandler.Register(rpc.LoadMobDropList, LoadMobDropList)
 
 	g_RPCHandler.Register(rpc.EquipItem, EquipItem)
 	g_RPCHandler.Register(rpc.UnEquipItem, UnEquipItem)
@@ -40,12 +46,16 @@ func RegisterPackets() {
 
 	g_RPCHandler.Register(rpc.AddItem, AddItem)
 	g_RPCHandler.Register(rpc.PurchaseItem, PurchaseItem)
+	g_RPCHandler.Register(rpc.SellItems, SellItems)
 	g_RPCHandler.Register(rpc.StackItem, StackItem)
 	g_RPCHandler.Register(rpc.RemoveItem, RemoveItem)
 	g_RPCHandler.Register(rpc.SwapItem, SwapItem)
 	g_RPCHandler.Register(rpc.MoveItem, MoveItem)
+	g_RPCHandler.Register(rpc.StorageMove, StorageMove)
+	g_RPCHandler.Register(rpc.EnchantItem, EnchantItem)
 
 	g_RPCHandler.Register(rpc.LearnSkill, LearnSkill)
+	g_RPCHandler.Register(rpc.GrantBattleModeSkills, GrantBattleModeSkills)
 	g_RPCHandler.Register(rpc.SaveSkill, SaveSkill)
 	g_RPCHandler.Register(rpc.UntrainSkill, UntrainSkill)
 

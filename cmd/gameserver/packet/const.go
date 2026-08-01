@@ -9,6 +9,7 @@ const (
 	VERIFYLINKS           = 141
 	INITIALIZED           = 142
 	UNINITIALZE           = 143
+	GETMYWAREHS           = 145
 	QUICKLINKSET          = 146
 	QUICKLINKSWAP         = 147
 	GETSVRTIME            = 148
@@ -17,6 +18,7 @@ const (
 	ITEMSELLING           = 162
 	SKILLTOMOBS           = 174
 	SKILLTOUSER           = 175
+	ATTCKTOMOBS           = 176
 	MOVEBEGINED           = 190
 	MOVEENDED00           = 191
 	MOVECHANGED           = 192
@@ -38,9 +40,13 @@ const (
 	NFY_MESSAGEEVNT       = 217
 	NFY_SKILLTOMOBS       = 220
 	NFY_SKILLTOUSER       = 221
+	NFY_ATTCKTOMOBS       = 225
 	SYSTEMMESSG           = 241
 	WARPCOMMAND           = 244
+	USESTATBONS           = 250
 	ITEM_USING            = 285
+	NFY_UPDATEDATAS       = 287
+	NFY_CHARTREVENT       = 288
 	SKILLTOACTS           = 310
 	NFY_SKILLTOACTS       = 311
 	CHANGESTYLE           = 322
@@ -50,6 +56,8 @@ const (
 	END_TARGET_USER       = 352
 	CHANGEDIRECTION       = 391
 	NFY_CHANGEDIRECTION   = 392
+	REQ_BROADCAST         = 396
+	NFY_BROADCAST         = 397
 	KEYMOVEBEGINED        = 401
 	KEYMOVEENDED00        = 402
 	NFY_KEYMOVEBEGINED    = 403
@@ -77,6 +85,7 @@ const (
 	BUY_SKILL_BOOK        = 2003
 	UPGRADE_SKILL         = 270
 	UNTRAIN_SKILL         = 271
+	UPGRADE_CORE_ENCHANT  = 951
 	CHANNEL_LIST          = 2112
 	CHANNEL_CHANGE        = 2141
 	CHAR_DEL_CHK_SUBPW    = 2160

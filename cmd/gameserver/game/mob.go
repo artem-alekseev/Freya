@@ -1,7 +1,6 @@
 package game
 
 import (
-	"github.com/ubis/Freya/share/models/inventory"
 	"github.com/ubis/Freya/share/network"
 	"math/rand"
 	"reflect"
@@ -24,22 +23,26 @@ const (
 
 // Mob struct represents a monster in the game world.
 type Mob struct {
-	Id           int     `yaml:"-"`
-	Species      int     `yaml:"id"`
-	SpawnX       int16   `yaml:"posx"`
-	SpawnY       int16   `yaml:"posy"`
-	MoveSpeed    float32 `yaml:"movespeed"`
-	FindCount    int     `yaml:"findcount"`
-	FindInterval int64   `yaml:"findinterval"`
-	MoveInterval int64   `yaml:"moveinterval"`
-	Level        int     `yaml:"lev"`
-	MaxHP        int     `yaml:"hp"`
-	CurrentHP    int     `yaml:"-"`
+	Id            int     `yaml:"-"`
+	Species       int     `yaml:"id"`
+	SpawnX        int16   `yaml:"posx"`
+	SpawnY        int16   `yaml:"posy"`
+	MoveSpeed     float32 `yaml:"movespeed"`
+	FindCount     int     `yaml:"findcount"`
+	FindInterval  int64   `yaml:"findinterval"`
+	MoveInterval  int64   `yaml:"moveinterval"`
+	SpawnInterval int64   `yaml:"spwninterval"`
+	Level         int     `yaml:"lev"`
+	Experience    uint64  `yaml:"exp"`
+	MaxHP         int     `yaml:"hp"`
+	CurrentHP     int     `yaml:"-"`
 
 	position   *context.Position
 	state      MobStateType
 	findRemain int
 	nextRun    int64
+	dead       bool
+	respawnAt  int64
 
 	mutex sync.RWMutex
 
@@ -70,13 +73,17 @@ func (m *Mob) Merge(mob *Mob) {
 	assignIfNotZero(&m.FindCount, mob.FindCount)
 	assignIfNotZero(&m.FindInterval, mob.FindInterval)
 	assignIfNotZero(&m.MoveInterval, mob.MoveInterval)
+	assignIfNotZero(&m.SpawnInterval, mob.SpawnInterval)
 	assignIfNotZero(&m.Level, mob.Level)
+	assignIfNotZero(&m.Experience, mob.Experience)
 	assignIfNotZero(&m.MaxHP, mob.MaxHP)
 }
 
 // Initialize sets up a mob with its default values, especially for its position and state.
 func (m *Mob) Initialize() {
 	m.CurrentHP = m.MaxHP
+	m.dead = false
+	m.respawnAt = 0
 
 	// initialize position data
 	m.position = &context.Position{
@@ -109,14 +116,25 @@ func (m *Mob) GetHealth() (int, int) {
 	return m.CurrentHP, m.MaxHP
 }
 
-func (m *Mob) SubHealth(hp int) {
+func (m *Mob) SubHealth(hp int) bool {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
+	if hp <= 0 || m.CurrentHP <= 0 {
+		return false
+	}
+
 	m.CurrentHP -= hp
+	if m.CurrentHP < 0 {
+		m.CurrentHP = 0
+	}
 
 	log.Debug(m.CurrentHP)
 	if m.CurrentHP <= 0 {
+		m.dead = true
+		if m.SpawnInterval > 0 {
+			m.respawnAt = time.Now().Add(time.Duration(m.SpawnInterval) * time.Millisecond).UnixMilli()
+		}
 		m.cell.RemoveMob(m)
 
 		pkt := network.NewWriter(packet.NFY_DELLINKMOBS)
@@ -130,9 +148,18 @@ func (m *Mob) SubHealth(hp int) {
 
 		m.world.BroadcastPacket(m.cell.column, m.cell.row, pkt)
 
-		item := inventory.Item{Kind: 1, Serials: 1, Option: 1, Slot: 0, Expire: 0}
-		m.cell.world.DropItem(&item, 0, m.position.CurrentX, m.position.CurrentY)
+		m.cell.world.DropMobItems(uint32(m.Species), int32(m.Id), m.position.CurrentX, m.position.CurrentY)
+		return true
 	}
+
+	return false
+}
+
+func (m *Mob) GetExperience() uint64 {
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
+
+	return m.Experience
 }
 
 // GetPosition safely retrieves the mob's position in the world.
@@ -182,9 +209,17 @@ func (m *Mob) Update() {
 	now := time.Now().UnixMilli()
 
 	m.mutex.RLock()
+	dead := m.dead
+	respawnAt := m.respawnAt
 	nextRun := m.nextRun
 	state := m.state
 	m.mutex.RUnlock()
+	if dead {
+		if respawnAt > 0 && now >= respawnAt {
+			m.respawn(now)
+		}
+		return
+	}
 
 	if nextRun > now {
 		return
@@ -196,6 +231,43 @@ func (m *Mob) Update() {
 	case MobStateMove:
 		m.handleMove(now)
 	}
+}
+
+func (m *Mob) respawn(now int64) {
+	m.mutex.Lock()
+	if !m.dead || m.respawnAt == 0 || now < m.respawnAt {
+		m.mutex.Unlock()
+		return
+	}
+
+	cell := m.world.getWorldCell(int(m.SpawnX), int(m.SpawnY))
+	if cell == nil {
+		m.mutex.Unlock()
+		log.Errorf("Unable to respawn mob %d: invalid spawn position", m.Id)
+		return
+	}
+
+	m.CurrentHP = m.MaxHP
+	m.dead = false
+	m.respawnAt = 0
+	m.cell = cell
+	m.position = &context.Position{
+		InitialX: int(m.SpawnX),
+		InitialY: int(m.SpawnY),
+		CurrentX: int(m.SpawnX),
+		CurrentY: int(m.SpawnY),
+		FinalX:   int(m.SpawnX),
+		FinalY:   int(m.SpawnY),
+	}
+	m.state = MobStateFind
+	m.findRemain = m.FindCount
+	m.nextRun = now + m.FindInterval
+	world := m.world
+	m.mutex.Unlock()
+
+	cell.AddMob(m)
+	column, row := cell.GetId()
+	world.BroadcastPacket(column, row, packet.NewMobsList([]context.MobHandler{m}))
 }
 
 // handleFind deals with the logic when the mob is in the 'find' state.

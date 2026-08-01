@@ -1,6 +1,7 @@
 package packet
 
 import (
+	"math"
 	"time"
 
 	"github.com/ubis/Freya/cmd/gameserver/context"
@@ -226,8 +227,10 @@ func KeyMoveBegined(session *network.Session, reader *network.Reader) {
 
 // KeyMoveEnded Packet
 func KeyMoveEnded(session *network.Session, reader *network.Reader) {
-	pntX := reader.ReadUint32() // float
-	pntY := reader.ReadUint32() // float
+	pntXBits := reader.ReadUint32()
+	pntYBits := reader.ReadUint32()
+	pntX := math.Float32frombits(pntXBits)
+	pntY := math.Float32frombits(pntYBits)
 
 	id, err := context.GetCharId(session)
 	if err != nil {
@@ -243,8 +246,25 @@ func KeyMoveEnded(session *network.Session, reader *network.Reader) {
 
 	pkt := network.NewWriter(NFY_KEYMOVEENDED00)
 	pkt.WriteInt32(id)
-	pkt.WriteInt32(pntX)
-	pkt.WriteInt32(pntY)
+	pkt.WriteUint32(pntXBits)
+	pkt.WriteUint32(pntYBits)
+
+	if !math.IsNaN(float64(pntX)) && !math.IsNaN(float64(pntY)) &&
+		!math.IsInf(float64(pntX), 0) && !math.IsInf(float64(pntY), 0) &&
+		pntX >= 0 && pntX <= 255 && pntY >= 0 && pntY <= 255 {
+		ctx, err := context.Parse(session)
+		if err == nil {
+			ctx.Mutex.Lock()
+			ctx.Char.BeginX = int16(pntX)
+			ctx.Char.BeginY = int16(pntY)
+			ctx.Char.EndX = int16(pntX)
+			ctx.Char.EndY = int16(pntY)
+			ctx.Char.X = byte(pntX)
+			ctx.Char.Y = byte(pntY)
+			ctx.Mutex.Unlock()
+			world.AdjustCell(session)
+		}
+	}
 
 	world.BroadcastSessionPacket(session, pkt)
 }

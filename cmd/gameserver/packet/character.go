@@ -458,16 +458,25 @@ func SetPlayerLevel(session *network.Session, level int) {
 		return
 	}
 
-	ctx.Mutex.RLock()
+	ctx.Mutex.Lock()
+	previousClassRank := ctx.Char.Style.MasteryLevel
 	ctx.Char.Level = uint16(level)
+	currentClassRank := character.ClassRankForLevel(ctx.Char.Level)
+	ctx.Char.Style.MasteryLevel = currentClassRank
 	id := ctx.Char.Id
-	ctx.Mutex.RUnlock()
+	ctx.Mutex.Unlock()
+	if err := ensureBattleModeSkillsForContext(ctx); err != nil {
+		log.Errorf("Unable to grant battle mode skills for character %d: %s", id, err)
+	}
 
 	pkt := network.NewWriter(288)
 	pkt.WriteByte(1) // 1 = level up; 2 = rank up
 	pkt.WriteInt32(id)
 
 	ctx.World.BroadcastSessionPacket(session, pkt)
+	if currentClassRank > previousClassRank {
+		sendClassRankUpEvent(session, id)
+	}
 
 	pkt = network.NewWriter(287)
 	pkt.WriteByte(10) // 10 = level up

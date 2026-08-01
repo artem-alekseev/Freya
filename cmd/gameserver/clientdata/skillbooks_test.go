@@ -24,6 +24,10 @@ func TestInitializeSkillBooks(t *testing.T) {
 	cabalData := []byte(`[Font]
 fs00=font
 <cabal>
+	<level_up>
+		<con level="1" exp="270" accuexp="270" />
+		<con level="2" exp="1080" accuexp="1350" />
+	</level_up>
 	<skill_order id="209" start_level="1" end_level="3" train_type="9" untrain_price="80" />
 	<cabal_world>
 		<world id="2">
@@ -44,7 +48,7 @@ fs00=font
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stats.Worlds != 1 || stats.Entries != 1 || stats.Books != 1 || stats.ShopItems != 1 {
+	if stats.Worlds != 1 || stats.Entries != 1 || stats.Books != 1 || stats.CharacterLevels != 2 || stats.ShopItems != 1 {
 		t.Fatalf("unexpected stats: %+v", stats)
 	}
 
@@ -67,6 +71,10 @@ fs00=font
 	if !ok || shopItem.ItemID != 61 || shopItem.Price != 400 {
 		t.Fatalf("shop item lookup failed: %+v", shopItem)
 	}
+	characterLevel, ok := FindCharacterLevel(1)
+	if !ok || characterLevel.AccumulatedExp != 270 || LevelForExperience(1, 270) != 2 || LevelForExperience(2, 99999) != 2 {
+		t.Fatalf("character level lookup failed: %+v", characterLevel)
+	}
 }
 
 func TestRepositorySkillBooks(t *testing.T) {
@@ -79,7 +87,7 @@ func TestRepositorySkillBooks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stats.Worlds == 0 || stats.Entries == 0 || stats.Books == 0 || stats.SkillLevels == 0 || stats.ShopItems == 0 {
+	if stats.Worlds == 0 || stats.Entries == 0 || stats.Books == 0 || stats.SkillLevels == 0 || stats.CharacterLevels == 0 || stats.ShopItems == 0 {
 		t.Fatalf("client DEC files contain no skill books: %+v", stats)
 	}
 }

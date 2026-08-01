@@ -11,6 +11,20 @@ type Style struct {
 	Helmet       bool `db:"show_helmet"`
 }
 
+// ClassRankForLevel returns the character class rank for a level.
+// Rank 1 covers levels 1-9, rank 2 covers levels 10-19, and so on.
+func ClassRankForLevel(level uint16) byte {
+	if level == 0 {
+		return 1
+	}
+
+	rank := (uint32(level)-1)/10 + 1
+	if rank > 31 {
+		rank = 31
+	}
+	return byte(rank)
+}
+
 // Deserializes style from uint32 to struct
 func (s *Style) Set(style uint32) {
 	s.BattleStyle = byte(style & 0x07)

@@ -1,6 +1,7 @@
 package rpc
 
 import (
+	"errors"
 	"time"
 
 	"github.com/ubis/Freya/share/log"
@@ -25,6 +26,7 @@ func LoadCharacters(_ *rpc.Client, r *character.ListReq, s *character.ListRes) e
 	var rows, err = db.Queryx(
 		"SELECT "+
 			"id, name, level, world, x, y, alz, nation, sword_rank, magic_rank, "+
+			"sword_exp, magic_exp, sword_point, magic_point, sword_rank_exp, magic_rank_exp, "+
 			"current_hp, max_hp, current_mp, max_mp, current_sp, max_sp, str_stat, "+
 			"int_stat, dex_stat, pnt_stat, exp, war_exp, created "+
 			"FROM characters "+
@@ -43,6 +45,16 @@ func LoadCharacters(_ *rpc.Client, r *character.ListReq, s *character.ListRes) e
 
 		if err == nil {
 			c.Style = LoadStyle(db, c.Id)
+			expectedRank := character.ClassRankForLevel(c.Level)
+			if c.Style.MasteryLevel != expectedRank {
+				if _, rankErr := db.Exec(
+					"UPDATE characters SET `rank` = ? WHERE id = ?",
+					expectedRank, c.Id,
+				); rankErr != nil {
+					log.Errorf("[DATABASE] unable to synchronize class rank for character %d: %s", c.Id, rankErr)
+				}
+				c.Style.MasteryLevel = expectedRank
+			}
 			c.Equipment = LoadEquipment(db, c.Id)
 
 			res.List = append(res.List, c)
@@ -140,13 +152,18 @@ func CreateCharacter(_ *rpc.Client, r *character.CreateReq, s *character.CreateR
 	c.World = byte(l["world"])
 	c.X = byte(l["x"])
 	c.Y = byte(l["y"])
-	c.CurrentHP = uint16(st["hp"])
-	c.MaxHP = uint16(st["hp"])
+	c.Level = 1
+	c.SwordRank = 1
+	c.MagicRank = 1
+	c.CurrentHP = 0
+	c.MaxHP = 0
 	c.CurrentMP = uint16(st["mp"])
 	c.MaxMP = uint16(st["mp"])
 	c.STR = uint32(st["str"])
 	c.INT = uint32(st["int"])
 	c.DEX = uint32(st["dex"])
+	c.RecalculateHP()
+	c.RecalculateMP()
 	c.Created = time.Now()
 
 	var sql = "INSERT INTO characters ("
@@ -222,6 +239,7 @@ func DeleteCharacter(_ *rpc.Client, r *character.DeleteReq, s *character.DeleteR
 
 	db.MustExec("DELETE FROM characters_equipment WHERE id = ?", r.CharId)
 	db.MustExec("DELETE FROM characters_inventory WHERE id = ?", r.CharId)
+	db.MustExec("DELETE FROM characters_warehouse WHERE id = ?", r.CharId)
 	db.MustExec("DELETE FROM characters_quickslots WHERE id = ?", r.CharId)
 	db.MustExec("DELETE FROM characters_skills WHERE id = ?", r.CharId)
 	db.MustExec("DELETE FROM characters WHERE id = ?", r.CharId)
@@ -263,10 +281,169 @@ func LoadCharacterData(c *rpc.Client, r *character.DataReq, s *character.DataRes
 
 	// load data
 	res.Inventory = LoadInventory(db, r.Id)
+	res.Warehouse = LoadWarehouse(db, r.Id)
 	res.Skills = LoadSkills(db, r.Id)
 	res.Links = LoadLinks(db, r.Id)
 
 	*s = res
+	return nil
+}
+
+// SaveExperience persists a character's exp and level with optimistic locking.
+func SaveExperience(_ *rpc.Client, r *character.ExperienceReq, s *character.ExperienceRes) error {
+	s.Result = false
+	if r.Character <= 0 || r.Level == 0 || r.Level < r.ExpectedLevel || r.Exp < r.ExpectedExp {
+		return errors.New("invalid experience update")
+	}
+	hasVitals := r.MaxHP != 0 || r.MaxMP != 0
+	if hasVitals && (r.MaxHP == 0 || r.CurrentHP > r.MaxHP ||
+		r.MaxMP == 0 || r.CurrentMP > r.MaxMP) {
+		return errors.New("invalid vitals update")
+	}
+
+	db := g_DatabaseManager.Get(r.Server)
+	if db == nil {
+		return errors.New("game database is not configured")
+	}
+
+	classRank := character.ClassRankForLevel(r.Level)
+	query := "UPDATE characters SET exp = ?, level = ?, `rank` = ?, pnt_stat = pnt_stat + ?"
+	args := []interface{}{r.Exp, r.Level, classRank, r.StatPoints}
+	if r.MaxHP != 0 {
+		query += ", current_hp = ?, max_hp = ?, current_mp = ?, max_mp = ?"
+		args = append(args, r.CurrentHP, r.MaxHP, r.CurrentMP, r.MaxMP)
+	}
+	query += " WHERE id = ? AND exp = ? AND level = ?"
+	args = append(args, r.Character, r.ExpectedExp, r.ExpectedLevel)
+
+	result, err := db.Exec(query, args...)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	s.Result = rows == 1
+	return nil
+}
+
+// SaveVitals persists the current and maximum HP/MP after a runtime
+// recalculation.
+func SaveVitals(_ *rpc.Client, r *character.VitalsRequest, s *character.VitalsResponse) error {
+	s.Result = false
+	if r == nil || r.Character <= 0 || r.MaxHP == 0 || r.CurrentHP > r.MaxHP ||
+		r.MaxMP == 0 || r.CurrentMP > r.MaxMP {
+		return errors.New("invalid character vitals update")
+	}
+
+	db := g_DatabaseManager.Get(r.Server)
+	if db == nil {
+		return errors.New("game database is not configured")
+	}
+
+	if _, err := db.Exec(
+		"UPDATE characters SET current_hp = ?, max_hp = ?, current_mp = ?, max_mp = ? WHERE id = ?",
+		r.CurrentHP, r.MaxHP, r.CurrentMP, r.MaxMP, r.Character,
+	); err != nil {
+		return err
+	}
+
+	s.Result = true
+	return nil
+}
+
+// SaveStat atomically spends one free stat point on STR, DEX, or INT.
+func SaveStat(_ *rpc.Client, r *character.StatRequest, s *character.StatResponse) error {
+	s.Result = false
+	if r == nil || r.Character <= 0 || r.Stat > 2 {
+		return errors.New("invalid stat update")
+	}
+
+	db := g_DatabaseManager.Get(r.Server)
+	if db == nil {
+		return errors.New("game database is not configured")
+	}
+
+	statColumn := ""
+	switch r.Stat {
+	case 0:
+		statColumn = "str_stat"
+	case 1:
+		statColumn = "dex_stat"
+	case 2:
+		statColumn = "int_stat"
+	}
+
+	tx, err := db.Beginx()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var current struct {
+		STR uint32 `db:"str_stat"`
+		DEX uint32 `db:"dex_stat"`
+		INT uint32 `db:"int_stat"`
+		PNT uint32 `db:"pnt_stat"`
+	}
+	if err := tx.Get(&current,
+		"SELECT str_stat, dex_stat, int_stat, pnt_stat FROM characters WHERE id = ? FOR UPDATE",
+		r.Character); err != nil {
+		return err
+	}
+
+	s.STR = current.STR
+	s.DEX = current.DEX
+	s.INT = current.INT
+	s.PNT = current.PNT
+	if current.PNT == 0 || current.PNT != r.ExpectedPNT {
+		return nil
+	}
+
+	if _, err := tx.Exec(
+		"UPDATE characters SET "+statColumn+" = "+statColumn+" + 1, pnt_stat = pnt_stat - 1 WHERE id = ?",
+		r.Character); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
+	switch r.Stat {
+	case 0:
+		s.STR++
+	case 1:
+		s.DEX++
+	case 2:
+		s.INT++
+	}
+	s.PNT--
+	s.Result = true
+	return nil
+}
+
+// SavePosition persists the last known character position.
+func SavePosition(_ *rpc.Client, r *character.PositionReq, s *character.PositionRes) error {
+	s.Result = false
+	if r == nil || r.Character <= 0 {
+		return errors.New("invalid character position update")
+	}
+
+	db := g_DatabaseManager.Get(r.Server)
+	if db == nil {
+		return errors.New("game database is not configured")
+	}
+
+	_, err := db.Exec(
+		"UPDATE characters SET world = ?, x = ?, y = ? WHERE id = ?",
+		r.World, r.X, r.Y, r.Character,
+	)
+	if err != nil {
+		return err
+	}
+	// MySQL reports zero affected rows when the position did not change.
+	s.Result = true
 	return nil
 }
 
@@ -298,6 +475,40 @@ func LoadInventory(db *sqlx.DB, id int32) inventory.Inventory {
 	}
 
 	return inv
+}
+
+// LoadWarehouse loads persistent warehouse items for a character.
+func LoadWarehouse(db *sqlx.DB, id int32) inventory.Inventory {
+	var warehouse = inventory.Inventory{}
+	warehouse.Init()
+
+	var rows, err = db.Queryx(
+		"SELECT kind, serials, opt, slot, expire "+
+			"FROM characters_warehouse "+
+			"WHERE id = ?", id)
+	if err != nil {
+		log.Error("[DATABASE]", err)
+		return warehouse
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var i = inventory.Item{}
+		var err2 = rows.StructScan(&i)
+
+		if err2 == nil {
+			warehouse.Set(i.Slot, i)
+		} else {
+			log.Error("[DATABASE]", err2)
+			return warehouse
+		}
+	}
+
+	if err = rows.Err(); err != nil {
+		log.Error("[DATABASE]", err)
+	}
+
+	return warehouse
 }
 
 // LoadSkills Database Call

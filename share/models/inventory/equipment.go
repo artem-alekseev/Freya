@@ -156,7 +156,7 @@ func (e *Equipment) SwapEquipItem(old, new uint16, i *Inventory) (bool, error) {
 		return ok, err
 	}
 
-	if ok, err := e.UnEquipItem(new, old, i); !ok {
+	if ok, err := e.unEquipItem(new, old, i); !ok {
 		// todo: attempt to rollback
 		return ok, err
 	}
@@ -174,6 +174,11 @@ func (e *Equipment) SwapEquipItem(old, new uint16, i *Inventory) (bool, error) {
 func (e *Equipment) UnEquipItem(old, new uint16, i *Inventory) (bool, error) {
 	e.mutexOut.Lock()
 	defer e.mutexOut.Unlock()
+
+	return e.unEquipItem(old, new, i)
+}
+
+func (e *Equipment) unEquipItem(old, new uint16, i *Inventory) (bool, error) {
 
 	// take from equipment (old) and move into inventory(new)
 	item, ok := e.Equip[int(old)]
