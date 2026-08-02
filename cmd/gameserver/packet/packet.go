@@ -98,6 +98,9 @@ func RegisterPackets() {
 	pk.Register(BUY_SKILL_BOOK, "BuySkillBook", BuySkillBook)
 	pk.Register(UPGRADE_SKILL, "UpgradeSkill", UpgradeSkill)
 	pk.Register(UNTRAIN_SKILL, "UntrainSkill", UntrainSkill)
+	pk.Register(ENCHANT_CORE, "EnchantCore", EnchantCore)
+	pk.Register(QUEST_OPEN, "QuestOpenEvent", QuestOpenEvent)
+	pk.Register(QUEST_UI_INFO, "QuestUIInfo", QuestUIInfo)
 	pk.Register(UPGRADE_CORE_ENCHANT, "UpgradeCoreEnchant", UpgradeCoreEnchant)
 	pk.Register(CHANNEL_LIST, "ChannelList", ChannelList)
 	pk.Register(CHANNEL_CHANGE, "ChannelChange", ChannelChange)
@@ -106,6 +109,7 @@ func RegisterPackets() {
 	pk.Register(STORAGE_EXCHANGE_MOVE, "StorageExchangeMove", StorageExchangeMove)
 	pk.Register(STORAGE_ITEM_SWAP, "StorageItemSwap", StorageItemSwap)
 	pk.Register(STORAGE_ITEM_DROP, "StorageItemDrop", StorageItemDrop)
+	pk.Register(ITEM_ATTACH, "ItemAttach", ItemAttach)
 	pk.Register(UPDATE_HELPINFO, "UpdateHelpInfo", UpdateHelpInfo)
 }
 
@@ -117,4 +121,5 @@ func RegisterFunc() {
 	script.RegisterFunc("setPlayerLevel", playerSetLevelFunc{Fn: SetPlayerLevel})
 	script.RegisterFunc("getPlayerPosition", playerPositionFunc{})
 	script.RegisterFunc("dropItem", playerDropItemFunc{})
+	script.RegisterFunc("addCashItem", playerAddCashItemFunc{})
 }

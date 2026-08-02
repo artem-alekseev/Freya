@@ -3,7 +3,9 @@ package context
 import (
 	"errors"
 	"sync"
+	"time"
 
+	"github.com/ubis/Freya/share/models/cashinventory"
 	"github.com/ubis/Freya/share/models/character"
 	"github.com/ubis/Freya/share/models/inventory"
 	"github.com/ubis/Freya/share/network"
@@ -11,9 +13,15 @@ import (
 
 // Context holds information related to the player's current context within the game.
 type Context struct {
-	Mutex     sync.RWMutex
-	Char      *character.Character
-	Warehouse inventory.Inventory
+	Mutex                 sync.RWMutex
+	Char                  *character.Character
+	Warehouse             inventory.Inventory
+	CashInventory         cashinventory.Inventory
+	BattleMode            BattleModeState
+	BattleModeGeneration  uint64
+	BattleModeEndTimer    *time.Timer
+	MPPotionCooldownUntil time.Time
+	ActiveQuests          [QuestSlotCount]ActiveQuest
 
 	Cell         CellHandler
 	World        WorldHandler

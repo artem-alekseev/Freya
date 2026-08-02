@@ -31,9 +31,6 @@ type World struct {
 
 	// tickers
 	itemTicker *time.Ticker
-
-	// data
-	Warps []context.Warp
 }
 
 // isCellValid checks if the cell coordinates are within valid bounds.
@@ -212,14 +209,11 @@ func (w *World) FindMob(mobId int) context.MobHandler {
 func (w *World) Initialize(manager *WorldManager) {
 	w.manager = manager
 
-	// load & assign data
-	w.Warps = manager.GetWarps(w.Id)
 	var mobs []*Mob
 	if manager.SpawnMobs {
 		mobs = w.loadMobs()
 	}
 
-	log.Debugf("Loaded %d warps in %d world", len(w.Warps), w.Id)
 	if manager.SpawnMobs {
 		log.Debugf("Loaded %d mobs in %d world", len(mobs), w.Id)
 	}
@@ -372,6 +366,21 @@ func (w *World) AdjustCell(session *network.Session) {
 	packet.SaveCharacterPosition(session)
 }
 
+// RefreshPlayer sends the nearby users, mobs and items after a same-world
+// server-side warp. WorldSvr sends this snapshot even when the destination is
+// in the same cell; the client uses it to finish the warp transition.
+func (w *World) RefreshPlayer(session *network.Session) {
+	cell := w.getCurrentCell(session)
+	if cell == nil {
+		return
+	}
+
+	column, row := cell.GetId()
+	for _, nearby := range w.getNearbyCells(column, row, 2) {
+		nearby.SendState(session)
+	}
+}
+
 // BroadcastPacket broadcasts a packet to nearby cells.
 func (w *World) BroadcastPacket(column, row byte, pkt *network.Writer) {
 	w.sendToNearbyCells(pkt, column, row, 2)
@@ -396,19 +405,6 @@ func (w *World) BroadcastAllPacket(pkt *network.Writer) {
 		cell.Send(pkt)
 		return false
 	})
-}
-
-// FindWarp finds a specific warp based on its ID.
-func (w *World) FindWarp(warp byte) *context.Warp {
-	for _, v := range w.Warps {
-		if v.Id != warp {
-			continue
-		}
-
-		return &v
-	}
-
-	return nil
 }
 
 // IsMovable determines if a specific position (x, y) within the world is

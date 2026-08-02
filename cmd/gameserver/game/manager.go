@@ -13,11 +13,7 @@ import (
 type WorldManager struct {
 	SpawnMobs bool
 	Worlds    []*World
-	Warps     []struct {
-		World byte
-		Warps []context.Warp
-	}
-	Mobs []*Mob
+	Mobs      []*Mob
 
 	dropMutex sync.RWMutex
 	dropList  map[uint32][]drop.Entry
@@ -60,12 +56,6 @@ func (wm *WorldManager) Initialize() {
 		return
 	}
 
-	// load warps
-	if err := load("warp.yml", &wm.Warps); err != nil {
-		log.Error("Failed to load world warp data:", err.Error())
-		return
-	}
-
 	if wm.SpawnMobs {
 		// load mob templates only when spawning is enabled
 		if err := load("mobs.yml", &wm.Mobs); err != nil {
@@ -77,7 +67,6 @@ func (wm *WorldManager) Initialize() {
 	}
 
 	log.Infof("Loaded %d world maps\n", len(wm.Worlds))
-	log.Infof("Loaded %d warps\n", len(wm.Warps))
 	if wm.SpawnMobs {
 		log.Infof("Loaded %d mobs\n", len(wm.Mobs))
 	}
@@ -104,19 +93,6 @@ func (wm *WorldManager) BroadcastAllPacket(pkt *network.Writer) {
 	for _, world := range wm.Worlds {
 		world.BroadcastAllPacket(pkt)
 	}
-}
-
-// GetWarps returns a slice of warps for a specific world.
-func (wm *WorldManager) GetWarps(world byte) []context.Warp {
-	for _, v := range wm.Warps {
-		if v.World != world {
-			continue
-		}
-
-		return v.Warps
-	}
-
-	return nil
 }
 
 // GetMob returns the mob that matches a given species ID.

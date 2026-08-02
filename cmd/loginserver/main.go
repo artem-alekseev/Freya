@@ -1,8 +1,11 @@
 package main
 
 import (
+	"path/filepath"
+
 	"github.com/ubis/Freya/cmd/loginserver/packet"
 	"github.com/ubis/Freya/cmd/loginserver/rpc"
+	"github.com/ubis/Freya/share/directory"
 	"github.com/ubis/Freya/share/log"
 	"github.com/ubis/Freya/share/script"
 
@@ -36,7 +39,7 @@ func main() {
 	packet.RegisterPackets()
 
 	// register scripting engine
-	script.Initialize(g_ServerConfig.ScriptDirectory)
+	script.Initialize(filepath.Join(directory.Root(), g_ServerConfig.ScriptDirectory))
 
 	// register scripting functions
 	packet.RegisterFunc()

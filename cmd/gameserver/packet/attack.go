@@ -60,6 +60,7 @@ func AttckToMobs(session *network.Session, reader *network.Reader) {
 	previousMobHP, _ := mob.GetHealth()
 	damage := 0
 	var gainedExperience uint64
+	spiritChanged := false
 	if previousMobHP > 0 {
 		attack := calculateCharacterAttack(ctx)
 		sendCharacterAttackValue(session, attack)
@@ -71,6 +72,7 @@ func AttckToMobs(session *network.Session, reader *network.Reader) {
 		if mob.SubHealth(damage) {
 			gainedExperience = mob.GetExperience()
 		}
+		spiritChanged = addSpiritPoints(ctx, 1)
 	}
 
 	mobHP, _ := mob.GetHealth()
@@ -83,6 +85,9 @@ func AttckToMobs(session *network.Session, reader *network.Reader) {
 	experience := ctx.Char.Exp
 	characterID := ctx.Char.Id
 	ctx.Mutex.RUnlock()
+	if spiritChanged {
+		saveContextVitals(ctx)
+	}
 
 	session.Send(newAttackToMobsResult(
 		mobID,

@@ -31,7 +31,7 @@ func main() {
 		log.Fatal("Unable to load client data: ", err.Error())
 		return
 	}
-	log.Infof("Loaded %d skill books, %d character levels and %d NPC shop items from client DEC files", stats.Books, stats.CharacterLevels, stats.ShopItems)
+	log.Infof("Loaded %d skill books, %d character levels, %d NPC shop items and %d warp points from client DEC files", stats.Books, stats.CharacterLevels, stats.ShopItems, stats.WarpPoints)
 
 	game := &game.WorldManager{SpawnMobs: g_ServerConfig.SpawnMobs}
 	game.Initialize()
@@ -43,7 +43,7 @@ func main() {
 	RegisterEvents(game)
 
 	// register scripting engine
-	script.Initialize(g_ServerConfig.ScriptDirectory)
+	script.Initialize(filepath.Join(directory.Root(), g_ServerConfig.ScriptDirectory))
 
 	// register scripting functions
 	packet.RegisterFunc()

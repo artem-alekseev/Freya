@@ -102,6 +102,18 @@ func SkillToMobs(session *network.Session, reader *network.Reader) {
 
 	attack := calculateCharacterAttack(ctx)
 	skillLevel := learnedSkillLevel(ctx, wSkillIdx)
+	skillMeta, hasSkillMeta := clientdata.FindSkillMeta(wSkillIdx)
+	remainingMP, manaCost, manaChanged, manaEnough := consumeSkillMana(ctx, skillMeta, skillLevel)
+	if hasSkillMeta && !manaEnough {
+		ctx.Mutex.RLock()
+		battleModeType := ctx.BattleMode.Type
+		ctx.Mutex.RUnlock()
+		log.Warningf("SkillToMobs: insufficient MP character=%d skill=%d level=%d current=%d required=%d battleMode=%d",
+			id, wSkillIdx, skillLevel, remainingMP, manaCost, battleModeType)
+		sendLastErrorCode(session, SKILLTOMOBS, uint16(skillMeta.Group), battleModeErrorMPInsufficiency)
+		return
+	}
+
 	skillInfo, hasSkillInfo := clientdata.FindSkillDamage(wSkillIdx)
 	skillDamage := attack.PhysicalMax
 	if hasSkillInfo {
@@ -152,6 +164,7 @@ func SkillToMobs(session *network.Session, reader *network.Reader) {
 		validTargets = append(validTargets, *target)
 	}
 	targets = validTargets
+	spiritChanged := addSpiritPoints(ctx, uint32(len(targets)))
 	skillExperience := skillExperienceResult{}
 	if hasSkillInfo && len(targets) > 0 {
 		skillExperience = addSkillExperience(ctx, skillInfo.Type, uint32(skillInfo.Experience())*skillExperienceMultiplier)
@@ -164,6 +177,9 @@ func SkillToMobs(session *network.Session, reader *network.Reader) {
 	currentSP := ctx.Char.CurrentSP
 	experience := ctx.Char.Exp
 	ctx.Mutex.RUnlock()
+	if spiritChanged || manaChanged {
+		saveContextVitals(ctx)
+	}
 
 	//log.Debugf(
 	//	"SkillToMob: skillID=%d, slot=%d, isMoving=%d, pos=(%d,%d), timing=%d, mainTarget=%d, targets=%d",
@@ -263,6 +279,33 @@ func SkillToMobs(session *network.Session, reader *network.Reader) {
 	ctx.World.BroadcastSessionPacket(session, npkt)
 }
 
+// consumeSkillMana follows WorldSvr::WasteMPVal. A regular skill spends its
+// MP cost once per SkillToMobs packet, and an active Battle Mode adds its
+// configured percentage to that cost. The caller sends the same error packet
+// WorldSvr uses when the resulting MP would be negative.
+func consumeSkillMana(ctx *context.Context, meta clientdata.SkillMeta, level byte) (uint16, uint32, bool, bool) {
+	cost := uint32(meta.MPWaste(level))
+
+	ctx.Mutex.Lock()
+	defer ctx.Mutex.Unlock()
+	if ctx.Char == nil {
+		return 0, cost, false, false
+	}
+
+	if ctx.BattleMode.Active() && ctx.BattleMode.MPWastePercent > 0 {
+		cost += cost * uint32(ctx.BattleMode.MPWastePercent) / 100
+	}
+	if cost > uint32(ctx.Char.CurrentMP) {
+		return ctx.Char.CurrentMP, cost, false, false
+	}
+	if cost == 0 {
+		return ctx.Char.CurrentMP, cost, false, true
+	}
+
+	ctx.Char.CurrentMP -= uint16(cost)
+	return ctx.Char.CurrentMP, cost, true, true
+}
+
 func learnedSkillLevel(ctx *context.Context, skillID uint16) byte {
 	ctx.Mutex.RLock()
 	defer ctx.Mutex.RUnlock()
@@ -317,6 +360,7 @@ func addExperience(ctx *context.Context, gained uint64) (uint16, uint16, bool, b
 		updatedCharacter.CurrentMP = updatedCharacter.MaxMP
 		updatedCharacter.RecalculateMP()
 		updatedCharacter.CurrentMP = updatedCharacter.MaxMP
+		updatedCharacter.RecalculateSP()
 	}
 	req := character.ExperienceReq{
 		Server:        byte(g_ServerSettings.ServerId),
@@ -332,6 +376,8 @@ func addExperience(ctx *context.Context, gained uint64) (uint16, uint16, bool, b
 		req.MaxHP = updatedCharacter.MaxHP
 		req.CurrentMP = updatedCharacter.CurrentMP
 		req.MaxMP = updatedCharacter.MaxMP
+		req.CurrentSP = updatedCharacter.CurrentSP
+		req.MaxSP = updatedCharacter.MaxSP
 	}
 	res := character.ExperienceRes{}
 	if err := g_RPCHandler.Call(rpc.SaveExperience, &req, &res); err != nil || !res.Result {
@@ -350,6 +396,8 @@ func addExperience(ctx *context.Context, gained uint64) (uint16, uint16, bool, b
 		ctx.Char.MaxHP = updatedCharacter.MaxHP
 		ctx.Char.CurrentMP = updatedCharacter.CurrentMP
 		ctx.Char.MaxMP = updatedCharacter.MaxMP
+		ctx.Char.CurrentSP = updatedCharacter.CurrentSP
+		ctx.Char.MaxSP = updatedCharacter.MaxSP
 	}
 	return previousLevel, currentLevel, true, classRankUp
 }

@@ -283,6 +283,54 @@ func StackItem(c *rpc.Client, r *inventory.ItemRequest, s *inventory.ItemRespons
 	return nil
 }
 
+// ConsumeItem atomically decrements one stackable item or removes it when
+// the consumed unit was the last one in the stack.
+func ConsumeItem(_ *rpc.Client, r *inventory.ItemRequest, s *inventory.ItemResponse) error {
+	s.Result = false
+	if r == nil || r.NewItem == nil || r.Id <= 0 || r.Item.Kind == 0 ||
+		r.Item.Option <= 0 || r.NewItem.Option != r.Item.Option-1 {
+		return nil
+	}
+
+	db := g_DatabaseManager.Get(r.Server)
+	tx, err := db.Beginx()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var stored inventory.Item
+	if err := tx.Get(&stored,
+		"SELECT kind, serials, opt, slot, expire FROM characters_inventory "+
+			"WHERE id = ? AND slot = ? AND kind = ? AND serials = ? AND opt = ? AND expire = ? FOR UPDATE",
+		r.Id, r.Item.Slot, r.Item.Kind, r.Item.Serials, r.Item.Option, r.Item.Expire); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		return err
+	}
+
+	if r.NewItem.Option == 0 {
+		_, err = tx.Exec(
+			"DELETE FROM characters_inventory WHERE id = ? AND slot = ? AND kind = ? AND serials = ? AND opt = ? AND expire = ?",
+			r.Id, r.Item.Slot, r.Item.Kind, r.Item.Serials, r.Item.Option, r.Item.Expire)
+	} else {
+		_, err = tx.Exec(
+			"UPDATE characters_inventory SET opt = ? WHERE id = ? AND slot = ? AND kind = ? AND serials = ? AND opt = ? AND expire = ?",
+			r.NewItem.Option, r.Id, r.Item.Slot, r.Item.Kind, r.Item.Serials, r.Item.Option, r.Item.Expire)
+	}
+	if err != nil {
+		return err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
+	s.Result = true
+	return nil
+}
+
 func RemoveItem(c *rpc.Client, r *inventory.ItemRequest, s *inventory.ItemResponse) error {
 	var db = g_DatabaseManager.Get(r.Server)
 

@@ -3,6 +3,7 @@ package character
 import (
 	"time"
 
+	"github.com/ubis/Freya/share/models/cashinventory"
 	"github.com/ubis/Freya/share/models/inventory"
 	"github.com/ubis/Freya/share/models/skills"
 )
@@ -96,11 +97,43 @@ type DataReq struct {
 	Id     int32
 }
 
+const QuestSlotCount = 10
+
 type DataRes struct {
-	Inventory inventory.Inventory
-	Warehouse inventory.Inventory
-	Skills    skills.SkillList
-	Links     skills.Links
+	Inventory     inventory.Inventory
+	Warehouse     inventory.Inventory
+	CashInventory []cashinventory.Item
+	Quests        []ActiveQuest
+	Skills        skills.SkillList
+	Links         skills.Links
+}
+
+type ActiveQuest struct {
+	QuestID        uint16 `db:"quest_id"`
+	Slot           byte   `db:"slot"`
+	TransmuterSlot uint16 `db:"transmuter_slot"`
+	ShowDesc       byte   `db:"show_desc"`
+	Expand         byte   `db:"expand"`
+}
+
+type OpenQuestReq struct {
+	Server    byte
+	Character int32
+	Quest     ActiveQuest
+}
+
+type OpenQuestRes struct {
+	Result bool
+}
+
+type QuestUIRequest struct {
+	Server    byte
+	Character int32
+	Quest     ActiveQuest
+}
+
+type QuestUIResponse struct {
+	Result bool
 }
 
 type ExperienceReq struct {
@@ -115,6 +148,8 @@ type ExperienceReq struct {
 	MaxHP         uint16
 	CurrentMP     uint16
 	MaxMP         uint16
+	CurrentSP     uint16
+	MaxSP         uint16
 }
 
 type ExperienceRes struct {
@@ -182,6 +217,8 @@ type VitalsRequest struct {
 	MaxHP     uint16
 	CurrentMP uint16
 	MaxMP     uint16
+	CurrentSP uint16
+	MaxSP     uint16
 }
 
 type VitalsResponse struct {

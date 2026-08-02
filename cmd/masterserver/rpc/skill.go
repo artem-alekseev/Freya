@@ -78,7 +78,7 @@ func LearnSkill(_ *rpc.Client, r *skills.LearnRequest, s *skills.SkillResponse) 
 
 const (
 	battleModeSkillSlotMin uint16 = 70
-	battleModeSkillSlotMax uint16 = 76
+	battleModeSkillSlotMax uint16 = 81
 )
 
 func isBattleModeSkillSlot(slot uint16) bool {

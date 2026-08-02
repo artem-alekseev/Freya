@@ -12,7 +12,7 @@ cfg/*
 
 ## Ignore decoded client data
 enc/
-WorldSvr
+server8files/
 docs
 
 ## Ignore macOS FS files

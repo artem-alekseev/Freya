@@ -44,6 +44,7 @@ type Stats struct {
 	SkillLevels     int
 	CharacterLevels int
 	ShopItems       int
+	WarpPoints      int
 }
 
 type trainerKey struct {
@@ -76,7 +77,19 @@ func Initialize(directory string) (Stats, error) {
 	if err != nil {
 		return Stats{}, err
 	}
+	parsedItemTypes := parseItemTypes(itemData, itemLayout)
 	sellData, err := parseItemSellPrices(itemData, itemLayout)
+	if err != nil {
+		return Stats{}, err
+	}
+	parsedManaPotions := parseManaPotionData(itemData, itemLayout)
+	parsedArmorBinderData := parseArmorBinderData(itemData, itemLayout)
+
+	cazData, err := os.ReadFile(filepath.Join(directory, "caz.dec"))
+	if err != nil {
+		return Stats{}, fmt.Errorf("read caz.dec: %w", err)
+	}
+	parsedItemDurations, err := parseItemDurations(cazData)
 	if err != nil {
 		return Stats{}, err
 	}
@@ -85,7 +98,23 @@ func Initialize(directory string) (Stats, error) {
 	if err != nil {
 		return Stats{}, fmt.Errorf("read cabal.dec: %w", err)
 	}
+	parsedWarpPoints, err := parseWarpPoints(cabalData)
+	if err != nil {
+		return Stats{}, err
+	}
+	parsedMapWarps, err := parseMapWarpIndices(cabalData)
+	if err != nil {
+		return Stats{}, err
+	}
+	parsedWarpRoutes, err := parseWarpRoutes(cabalData)
+	if err != nil {
+		return Stats{}, err
+	}
 	damageData, err := parseSkillDamageData(cabalData)
+	if err != nil {
+		return Stats{}, err
+	}
+	skillMetadata, err := parseSkillMetaData(cabalData)
 	if err != nil {
 		return Stats{}, err
 	}
@@ -118,6 +147,10 @@ func Initialize(directory string) (Stats, error) {
 	if err != nil {
 		return Stats{}, err
 	}
+	parsedForceCoreRates, parsedForceCoreOptions, parsedForceCoreChanges, err := parseForceCoreData(cabalData)
+	if err != nil {
+		return Stats{}, err
+	}
 	byItem := make(map[uint32]SkillBook)
 	for _, trainerBooks := range loaded {
 		for _, book := range trainerBooks {
@@ -135,7 +168,12 @@ func Initialize(directory string) (Stats, error) {
 	skillBooksByItem = byItem
 	skillLevels = levels
 	skillDamageData = damageData
+	skillMetaData = skillMetadata
 	itemSellData = sellData
+	itemTypes = parsedItemTypes
+	manaPotionData = parsedManaPotions
+	armorBinderResults = parsedArmorBinderData
+	itemDurations = parsedItemDurations
 	if len(parsedWeaponData) > 0 {
 		weaponAttackData = parsedWeaponData
 	}
@@ -143,9 +181,16 @@ func Initialize(directory string) (Stats, error) {
 	skillRankProgressData = rankProgress
 	skillRankBonusData = rankBonuses
 	battleModeSkillData = battleModeSkills
+	forceCoreRates = parsedForceCoreRates
+	forceCoreOptions = parsedForceCoreOptions
+	forceCoreChanges = parsedForceCoreChanges
 	shopItems = shops
 	stats.CharacterLevels = len(levelsTable)
 	stats.ShopItems = shopItemCount(shops)
+	warpPoints = parsedWarpPoints
+	warpRoutes = parsedWarpRoutes
+	mapWarps = parsedMapWarps
+	stats.WarpPoints = len(parsedWarpPoints)
 	return stats, nil
 }
 
@@ -165,12 +210,12 @@ func FindSkillBookItem(itemID uint32) (SkillBook, bool) {
 }
 
 func FindItemSellPrice(itemID uint32) (uint64, bool) {
-	data, ok := itemSellData[itemID&0x0000FFFF]
+	data, ok := itemSellData[itemID&itemDataKindMask]
 	return data.price, ok
 }
 
 func FindItemSellValue(itemID uint32, itemOption int32) (uint64, bool) {
-	data, ok := itemSellData[itemID&0x0000FFFF]
+	data, ok := itemSellData[itemID&itemDataKindMask]
 	if !ok || data.price == 0 {
 		return 0, false
 	}

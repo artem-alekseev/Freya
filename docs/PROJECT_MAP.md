@@ -17,7 +17,7 @@ flowchart LR
     LDB[("MariaDB: login")]
     WDB[("MariaDB: world 1..N")]
     YAML["data/*.yml<br/>tmap.bin"]
-    DEC["enc/cabal.dec<br/>enc/item.dec"]
+    DEC["enc/cabal.dec<br/>enc/item.dec<br/>enc/caz.dec"]
     LUA["script/*.lua"]
 
     C -->|"версия, авторизация,<br/>список каналов"| LS
@@ -68,12 +68,16 @@ flowchart LR
 
 1. Берёт `serverID` и `channelID` из аргументов, по умолчанию `1 1`.
 2. Читает `cfg/gameserver_<serverID>_<channelID>.ini`.
-3. Загружает миры, варпы, шаблоны и размещение мобов.
+3. Загружает миры, шаблоны и размещение мобов из `data/`, а точки и
+   маршруты варпов — из `enc/cabal.dec` (`warp_point`, `warp_npc`,
+   `map_index`). Отдельный `data/warp.yml` не используется.
 4. Загружает и взаимно проверяет каталог книг навыков из клиентских
    `enc/cabal.dec` и `enc/item.dec`.
    Из `enc/cabal.dec` также загружаются пороги `exp_for_point`, условия
    `rankup_condition`, бонусы `rank_bonus` для мечевого/магического ранга и
    выдаваемые по класс-рангу навыки из `mastery_levelup`.
+   Из `enc/caz.dec` загружаются длительности cash-предметов для формирования
+   упакованного `ITEM_PERIOD` при получении предмета из CashInventory.
 5. Регистрирует события, Lua, клиентские пакеты и обратные RPC handlers.
 6. При подключении к Master загружает дроплист мобов из World DB через
    `LoadMobDropList` и держит его в `WorldManager`.
@@ -105,7 +109,8 @@ flowchart LR
 1. Game получает список персонажей через `LoadCharacters`.
 2. `Initialized` проверяет, что `charId >> 3` совпадает с ID аккаунта.
 3. Дополнительные данные загружаются через `LoadCharacterData`:
-   inventory, skills, quick links; equipment входит в основной character load.
+   inventory, CashInventory, skills, quick links; equipment входит в основной
+   character load.
 4. `Inventory`, `Equipment` и `Links` получают RPC connection через
    `Setup(...)`; `Warehouse` загружается вместе с `LoadCharacterData`.
 5. `share/models/character/hp.go` и `mp.go` пересчитывают HP/MP по battle
@@ -120,10 +125,27 @@ flowchart LR
    недостающие навыки боевых режимов в `characters_skills`.
 8. `StorageExchangeMove` переносит предметы между инвентарём и складом через
    Master RPC `StorageMove` в одной SQL-транзакции.
-9. `context.Context` получает выбранного персонажа, мир и клетку.
-10. `World.EnterWorld` рассылает состояние соседним клеткам и запускает
+9. `QueryCashItem` обновляет список CashInventory через Master RPC
+   `LoadCashInventory`. `UseCashItem` проверяет duration из `caz.dec`, затем
+   Master RPC `UseCashItem` в одной SQL-транзакции переносит запись в обычный
+   инвентарь.
+10. `ItemAttach` (ArmorBinder) строит преобразования по `item.dec`, затем
+   атомарно заменяет `kind` целевого предмета и удаляет карту через Master RPC
+   `AttachItem`.
+11. `EnchantCore` загружает `fcore_rate`, список Force-опций и преобразования
+   1H/2H из `enc/cabal.dec`. Шанс берётся по активным опциям и заточке с
+   добавлением 5% за каждый камень; изменение `item_option` и расход
+   свитков/камней выполняются одной транзакцией через Master RPC
+   `ForceCoreEnchant`.
+12. `context.Context` получает выбранного персонажа, мир и клетку.
+13. `QuestOpenEvent` принимает no-item/no-skill пакет `QUESTOPNEVT` (`282`),
+   проверяет слот и дубли, сохраняет открытый квест через Master RPC в
+   `characters_quests` и обновляет runtime-контекст.
+14. `QuestUIInfo` (`2175`) сохраняет флаги отображения и разворачивания
+   активного квеста в `characters_quests`.
+15. `World.EnterWorld` рассылает состояние соседним клеткам и запускает
    игровые события/Lua hooks.
-11. При переходе в новую клетку, варпе, выходе из мира или отключении Game
+16. При переходе в новую клетку, варпе, выходе из мира или отключении Game
    сохраняет последние `world/x/y` через Master RPC `SavePosition`.
 
 ### Дроп мобов
@@ -176,7 +198,7 @@ DEC-файлы являются runtime-входом и намеренно ис�
 | Список серверов и каналов | Master `ServerManager` | Нет |
 | TCP-сессия и online-флаги | Login/Game `Network` | Нет |
 | Персонаж и его текущий context | Game | World DB через Master |
-| Инвентарь, склад, экипировка, навыки, quick links | Game-модели + Master RPC | World DB |
+| Инвентарь, CashInventory, склад, экипировка, навыки, quick links, активные квесты | Game-модели + Master RPC | World DB |
 | Каталог книг навыков и цены | Game `clientdata` | `enc/cabal.dec`, `enc/item.dec` |
 | Миры, клетки, мобы, предметы на земле | Game `WorldManager` | YAML/runtime и `mob_drop_list` через Master |
 | Конфигурация поведения | Каждый процесс | INI/YAML/Lua |

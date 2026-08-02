@@ -101,6 +101,35 @@ CREATE TABLE `characters_inventory` (
 -- --------------------------------------------------------
 
 --
+-- Table structure for table `characters_cash_inventory`
+--
+
+CREATE TABLE `characters_cash_inventory` (
+  `id` int(11) NOT NULL,
+  `cash_id` int(11) NOT NULL,
+  `kind` int(10) UNSIGNED NOT NULL,
+  `opt` int(11) NOT NULL DEFAULT '0',
+  `duration_idx` tinyint(3) UNSIGNED NOT NULL DEFAULT '31'
+) ENGINE=InnoDB DEFAULT CHARSET=latin1 ROW_FORMAT=COMPACT;
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `characters_quests`
+--
+
+CREATE TABLE `characters_quests` (
+  `id` int(11) NOT NULL,
+  `quest_id` smallint(5) UNSIGNED NOT NULL,
+  `slot` tinyint(3) UNSIGNED NOT NULL,
+  `transmuter_slot` smallint(5) UNSIGNED NOT NULL DEFAULT '65535',
+  `show_desc` tinyint(3) UNSIGNED NOT NULL DEFAULT '0',
+  `expand` tinyint(3) UNSIGNED NOT NULL DEFAULT '0'
+) ENGINE=InnoDB DEFAULT CHARSET=latin1 ROW_FORMAT=COMPACT;
+
+-- --------------------------------------------------------
+
+--
 -- Table structure for table `characters_warehouse`
 --
 
@@ -192,6 +221,19 @@ ALTER TABLE `characters_inventory`
   ADD PRIMARY KEY (`id`,`slot`);
 
 --
+-- Indexes for table `characters_cash_inventory`
+--
+ALTER TABLE `characters_cash_inventory`
+  ADD PRIMARY KEY (`id`,`cash_id`);
+
+--
+-- Indexes for table `characters_quests`
+--
+ALTER TABLE `characters_quests`
+  ADD PRIMARY KEY (`id`,`slot`),
+  ADD UNIQUE KEY `uq_characters_quests_quest` (`id`,`quest_id`);
+
+--
 -- Indexes for table `characters_warehouse`
 --
 ALTER TABLE `characters_warehouse`
@@ -218,6 +260,18 @@ ALTER TABLE `lobby_metadata`
 --
 -- Constraints for dumped tables
 --
+
+--
+-- Constraints for table `characters_cash_inventory`
+--
+ALTER TABLE `characters_cash_inventory`
+  ADD CONSTRAINT `characters_cash_inventory_ibfk_1` FOREIGN KEY (`id`) REFERENCES `characters` (`id`);
+
+--
+-- Constraints for table `characters_quests`
+--
+ALTER TABLE `characters_quests`
+  ADD CONSTRAINT `characters_quests_ibfk_1` FOREIGN KEY (`id`) REFERENCES `characters` (`id`);
 
 --
 -- Constraints for table `characters_equipment`

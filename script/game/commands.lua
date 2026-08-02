@@ -4,6 +4,7 @@ addCommandHandler('help', function(session)
     sendClientMessage(session, ' #getlevel - get current level')
     sendClientMessage(session, ' #setlevel <new_level> - set new level')
     sendClientMessage(session, ' #drop <kind> <opt> - drop an item')
+    sendClientMessage(session, ' #cash <kind> <opt> <count> - add items to cash shop')
 end)
 
 addCommandHandler('reload', function(session)
@@ -94,4 +95,23 @@ addCommandHandler('drop', function(session, kind, opt)
     end
 
     dropItem(session, kind_id, opt_id)
+end)
+
+addCommandHandler('cash', function(session, kind, opt, count)
+    local kind_id = tonumber(kind)
+    local opt_id = tonumber(opt)
+    local count_id = tonumber(count)
+
+    if not kind_id or not opt_id or not count_id or count_id < 1 or count_id > 1000 or count_id % 1 ~= 0 then
+        sendClientMessage(session, 'Invalid command usage: #cash <kind> <opt> <count>')
+        return
+    end
+
+    local added, amount = addCashItem(session, kind_id, opt_id, count_id)
+    if not added then
+        sendClientMessage(session, 'Unable to add cash items')
+        return
+    end
+
+    sendClientMessage(session, 'Cash shop items added: '..amount)
 end)

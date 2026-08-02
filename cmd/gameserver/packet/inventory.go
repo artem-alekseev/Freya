@@ -1,9 +1,12 @@
 package packet
 
 import (
+	"time"
+
 	"github.com/ubis/Freya/cmd/gameserver/clientdata"
 	"github.com/ubis/Freya/cmd/gameserver/context"
 	"github.com/ubis/Freya/share/log"
+	"github.com/ubis/Freya/share/models/cashinventory"
 	"github.com/ubis/Freya/share/models/inventory"
 	"github.com/ubis/Freya/share/models/skills"
 	"github.com/ubis/Freya/share/network"
@@ -272,31 +275,103 @@ func sendStorageSwapResult(session *network.Session, result bool) {
 }
 
 func QueryCashItem(session *network.Session, reader *network.Reader) {
-	pkt := network.NewWriter(QUERYCASHITEM)
-	pkt.WriteInt32(0) //count
+	_ = reader
+	ctx, err := context.Parse(session)
+	if err != nil {
+		log.Error(err.Error())
+		return
+	}
 
-	//pkt.WriteInt32(1) //cash item id
-	//pkt.WriteInt32(1) //kind
-	//pkt.WriteInt32(0) // option
-	//pkt.WriteByte(31) // duration
+	ctx.Mutex.RLock()
+	characterID := ctx.Char.Id
+	ctx.Mutex.RUnlock()
+	request := cashinventory.LoadRequest{
+		Server:    byte(g_ServerSettings.ServerId),
+		Character: characterID,
+	}
+	response := cashinventory.LoadResponse{}
+	if err := g_RPCHandler.Call(rpc.LoadCashInventory, &request, &response); err != nil {
+		log.Errorf("Unable to load cash inventory for character %d: %s", characterID, err)
+	} else {
+		ctx.CashInventory.Init(response.Items)
+	}
+	items := ctx.CashInventory.List()
+	pkt := network.NewWriter(QUERYCASHITEM)
+	pkt.WriteInt32(len(items))
+	for _, item := range items {
+		pkt.WriteInt32(item.ID)
+		pkt.WriteUint32(item.Kind)
+		pkt.WriteInt32(item.Option)
+		pkt.WriteByte(item.DurationID)
+	}
 
 	session.Send(pkt)
 }
 
 func UseCashItem(session *network.Session, reader *network.Reader) {
-	id := reader.ReadInt32()   // cash item id
-	slot := reader.ReadInt16() // slot ??
+	id := reader.ReadInt32()
+	slot := reader.ReadUint16()
+	result := cashinventory.UseDatabaseFailed
+	item := inventory.Item{}
+
+	ctx, err := context.Parse(session)
+	if err == nil {
+		cashItem, exists := ctx.CashInventory.Get(id)
+		switch {
+		case !exists:
+			result = cashinventory.UseNotFound
+		case slot >= cashInventorySlotCount:
+			result = cashinventory.UseSlotOccupied
+		case ctx.Char.Inventory.Get(slot).Kind != 0:
+			result = cashinventory.UseSlotOccupied
+		default:
+			expire, valid := clientdata.CashItemExpiration(cashItem.DurationID)
+			if !valid {
+				result = cashinventory.UseCreateFailed
+				break
+			}
+
+			req := cashinventory.UseRequest{
+				Server:    byte(g_ServerSettings.ServerId),
+				Character: ctx.Char.Id,
+				CashID:    cashItem.ID,
+				Slot:      slot,
+				Item:      cashItem,
+				Expire:    expire,
+			}
+			res := cashinventory.UseResponse{}
+			if rpcErr := g_RPCHandler.Call(rpc.UseCashItem, &req, &res); rpcErr != nil {
+				log.Errorf("Unable to use cash item %d for character %d: %s", id, ctx.Char.Id, rpcErr)
+				break
+			}
+			result = res.Result
+			if result == cashinventory.UseOK {
+				item = res.Item
+				ctx.Char.Inventory.SetLocal(item)
+				ctx.CashInventory.Remove(id)
+			}
+		}
+	} else {
+		log.Error(err.Error())
+	}
 
 	pkt := network.NewWriter(USECASHITEM)
-	pkt.WriteInt32(id)   //count
-	pkt.WriteInt32(1)    //item
-	pkt.WriteInt32(0)    // option
-	pkt.WriteInt16(slot) // slot
-	pkt.WriteInt32(30)   //time
-	pkt.WriteInt32(0)    // status
-
+	pkt.WriteInt32(id)
+	pkt.WriteUint32(item.Kind)
+	pkt.WriteInt32(item.Option)
+	pkt.WriteUint16(item.Slot)
+	pkt.WriteUint32(item.Expire)
+	pkt.WriteInt32(result)
 	session.Send(pkt)
 }
+
+const (
+	// WorldSvr defines INVENTORY_SLOTNUM as 256 normal slots plus 10
+	// temporary slots. Cash items are accepted anywhere in that range.
+	normalInventorySlotCount uint16 = 256
+	tempInventorySlotCount   uint16 = 10
+	cashInventorySlotCount          = normalInventorySlotCount + tempInventorySlotCount
+)
 
 func StorageItemDrop(session *network.Session, reader *network.Reader) {
 	_ = reader.ReadInt32() // unk
@@ -514,13 +589,27 @@ func ItemBuyings(session *network.Session, reader *network.Reader) {
 		itemBuyingFailByIndex     int32 = 1
 		itemBuyingFailByOperation int32 = 2
 		itemBuyingFailByAlz       int32 = 5
+		itemBuyingHeaderSize            = 10
+		itemBuyingNonGroupSize          = itemBuyingHeaderSize + 1 + 4 + 4 + 4 + 2
 	)
 
 	npcIndex := reader.ReadByte()
 	setIndex := reader.ReadInt32()
 	remoteShopSlot := reader.ReadInt32()
-	tradeCount := reader.ReadInt32()
-	inventorySlot := reader.ReadInt32()
+	var requestedKind uint32
+	var tradeCount int32
+	var inventorySlot int32
+	if int(reader.Size) == itemBuyingNonGroupSize {
+		// Non-group clients include the complete kind index in the request.
+		requestedKind = reader.ReadUint32()
+		inventorySlot = int32(reader.ReadUint16())
+		tradeCount = 1
+	} else {
+		// Group-trade clients send a count followed by free inventory slots;
+		// the kind is taken from the validated shop entry below.
+		tradeCount = reader.ReadInt32()
+		inventorySlot = reader.ReadInt32()
+	}
 
 	result := itemBuyingFailByIndex
 	item := inventory.Item{}
@@ -549,15 +638,25 @@ func ItemBuyings(session *network.Session, reader *network.Reader) {
 	ctx.Mutex.RUnlock()
 
 	shopItem, exists := clientdata.FindShopItem(worldID, npcIndex, setIndex)
-	if !exists || shopItem.ItemID == 0 || shopItem.Price == 0 {
+	shopKind := shopItem.Kind
+	if shopKind == 0 {
+		shopKind = shopItem.ItemID
+	}
+	if !exists || shopKind == 0 || shopItem.Price == 0 {
 		log.Warningf("[ITEMBUYINGS] Unknown shop item: character %d, world %d, NPC %d, slot %d",
 			characterID, worldID, npcIndex, setIndex)
 		sendItemBuyingsResult(session, result, item)
 		return
 	}
+	if requestedKind != 0 && requestedKind != shopKind {
+		log.Warningf("[ITEMBUYINGS] Kind mismatch: character %d, world %d, NPC %d, slot %d, client kind %d, shop kind %d",
+			characterID, worldID, npcIndex, setIndex, requestedKind, shopKind)
+		sendItemBuyingsResult(session, result, item)
+		return
+	}
 
 	item = inventory.Item{
-		Kind:   shopItem.ItemID,
+		Kind:   shopKind,
 		Option: shopItem.Option,
 		Slot:   uint16(inventorySlot),
 	}
@@ -591,7 +690,6 @@ func sendItemBuyingsResult(session *network.Session, result int32, item inventor
 	pkt := network.NewWriter(ITEMBUYINGS)
 	pkt.WriteInt32(result)
 	pkt.WriteUint32(item.Kind)
-	pkt.WriteUint32(item.Serials)
 	pkt.WriteInt32(item.Option)
 	pkt.WriteUint16(item.Slot)
 	pkt.WriteUint32(item.Expire)
@@ -676,6 +774,11 @@ func ItemUsing(session *network.Session, reader *network.Reader) {
 	ctx.Mutex.RUnlock()
 
 	item := characterInventory.Get(slot)
+	if recovery, isManaPotion := clientdata.FindManaPotionRecovery(item.Kind); isManaPotion {
+		useManaPotion(session, ctx, slot, item, recovery)
+		return
+	}
+
 	book, isSkillBook := clientdata.FindSkillBookItem(item.Kind)
 	if !isSkillBook {
 		log.Warningf("Rejected unsupported item use: character %d, item %d, slot %d", characterID, item.Kind, slot)
@@ -731,6 +834,60 @@ func ItemUsing(session *network.Session, reader *network.Reader) {
 	}
 
 	sendItemUsingResult(session, result)
+}
+
+const manaPotionCooldown = 2 * time.Second
+
+func useManaPotion(session *network.Session, ctx *context.Context, slot uint16, item inventory.Item, recovery uint16) {
+	now := time.Now()
+	ctx.Mutex.Lock()
+	if ctx.Char == nil || ctx.Char.CurrentMP >= ctx.Char.MaxMP ||
+		item.Option <= 0 || now.Before(ctx.MPPotionCooldownUntil) {
+		characterID := int32(0)
+		if ctx.Char != nil {
+			characterID = ctx.Char.Id
+		}
+		ctx.Mutex.Unlock()
+		log.Warningf("Rejected mana potion use: character %d, item %d, slot %d", characterID, item.Kind, slot)
+		sendItemUsingResult(session, false)
+		return
+	}
+	characterID := ctx.Char.Id
+	ctx.MPPotionCooldownUntil = now.Add(manaPotionCooldown)
+	ctx.Mutex.Unlock()
+
+	updatedItem, consumed, err := ctx.Char.Inventory.ConsumeOne(slot)
+	if err != nil || !consumed {
+		ctx.Mutex.Lock()
+		ctx.MPPotionCooldownUntil = time.Time{}
+		ctx.Mutex.Unlock()
+		if err != nil {
+			log.Errorf("Unable to consume mana potion %d for character %d: %s", item.Kind, characterID, err)
+		}
+		sendItemUsingResult(session, false)
+		return
+	}
+
+	ctx.Mutex.Lock()
+	currentMP := uint32(ctx.Char.CurrentMP) + uint32(recovery)
+	if currentMP > uint32(ctx.Char.MaxMP) {
+		currentMP = uint32(ctx.Char.MaxMP)
+	}
+	ctx.Char.CurrentMP = uint16(currentMP)
+	newMP := ctx.Char.CurrentMP
+	snapshot := *ctx.Char
+	ctx.Mutex.Unlock()
+
+	if !saveCharacterVitals(&snapshot) {
+		log.Warningf("Mana potion was consumed but vitals were not saved: character %d", characterID)
+	}
+
+	// WorldSvr sends the potion-specific update first and the ITEMUSING
+	// result second. The client uses this sequence to refresh the stack count.
+	sendManaPotionUpdate(session, newMP)
+	sendItemUsingResult(session, true)
+	log.Infof("Character %d used mana potion %d in slot %d, restored %d MP, remaining %d",
+		characterID, item.Kind, slot, recovery, updatedItem.Option)
 }
 
 func sendItemUsingResult(session *network.Session, result bool) {

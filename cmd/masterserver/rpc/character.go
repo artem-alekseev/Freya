@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/ubis/Freya/share/log"
+	"github.com/ubis/Freya/share/models/cashinventory"
 	"github.com/ubis/Freya/share/models/character"
 	"github.com/ubis/Freya/share/models/inventory"
 	"github.com/ubis/Freya/share/models/skills"
@@ -239,6 +240,8 @@ func DeleteCharacter(_ *rpc.Client, r *character.DeleteReq, s *character.DeleteR
 
 	db.MustExec("DELETE FROM characters_equipment WHERE id = ?", r.CharId)
 	db.MustExec("DELETE FROM characters_inventory WHERE id = ?", r.CharId)
+	db.MustExec("DELETE FROM characters_cash_inventory WHERE id = ?", r.CharId)
+	db.MustExec("DELETE FROM characters_quests WHERE id = ?", r.CharId)
 	db.MustExec("DELETE FROM characters_warehouse WHERE id = ?", r.CharId)
 	db.MustExec("DELETE FROM characters_quickslots WHERE id = ?", r.CharId)
 	db.MustExec("DELETE FROM characters_skills WHERE id = ?", r.CharId)
@@ -282,11 +285,40 @@ func LoadCharacterData(c *rpc.Client, r *character.DataReq, s *character.DataRes
 	// load data
 	res.Inventory = LoadInventory(db, r.Id)
 	res.Warehouse = LoadWarehouse(db, r.Id)
+	res.CashInventory = loadCashInventory(db, r.Id)
+	res.Quests = LoadQuests(db, r.Id)
 	res.Skills = LoadSkills(db, r.Id)
 	res.Links = LoadLinks(db, r.Id)
 
 	*s = res
 	return nil
+}
+
+// LoadQuests loads the active quest slots saved for a character.
+func LoadQuests(db *sqlx.DB, id int32) []character.ActiveQuest {
+	quests := make([]character.ActiveQuest, 0, character.QuestSlotCount)
+	rows, err := db.Queryx(
+		"SELECT quest_id, slot, transmuter_slot, show_desc, expand "+
+			"FROM characters_quests WHERE id = ? ORDER BY slot", id)
+	if err != nil {
+		log.Error("[DATABASE]", err)
+		return quests
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var active character.ActiveQuest
+		if err := rows.StructScan(&active); err != nil {
+			log.Error("[DATABASE]", err)
+			return quests
+		}
+		quests = append(quests, active)
+	}
+	if err := rows.Err(); err != nil {
+		log.Error("[DATABASE]", err)
+	}
+
+	return quests
 }
 
 // SaveExperience persists a character's exp and level with optimistic locking.
@@ -295,9 +327,9 @@ func SaveExperience(_ *rpc.Client, r *character.ExperienceReq, s *character.Expe
 	if r.Character <= 0 || r.Level == 0 || r.Level < r.ExpectedLevel || r.Exp < r.ExpectedExp {
 		return errors.New("invalid experience update")
 	}
-	hasVitals := r.MaxHP != 0 || r.MaxMP != 0
+	hasVitals := r.MaxHP != 0 || r.MaxMP != 0 || r.MaxSP != 0
 	if hasVitals && (r.MaxHP == 0 || r.CurrentHP > r.MaxHP ||
-		r.MaxMP == 0 || r.CurrentMP > r.MaxMP) {
+		r.MaxMP == 0 || r.CurrentMP > r.MaxMP || r.CurrentSP > r.MaxSP) {
 		return errors.New("invalid vitals update")
 	}
 
@@ -310,8 +342,8 @@ func SaveExperience(_ *rpc.Client, r *character.ExperienceReq, s *character.Expe
 	query := "UPDATE characters SET exp = ?, level = ?, `rank` = ?, pnt_stat = pnt_stat + ?"
 	args := []interface{}{r.Exp, r.Level, classRank, r.StatPoints}
 	if r.MaxHP != 0 {
-		query += ", current_hp = ?, max_hp = ?, current_mp = ?, max_mp = ?"
-		args = append(args, r.CurrentHP, r.MaxHP, r.CurrentMP, r.MaxMP)
+		query += ", current_hp = ?, max_hp = ?, current_mp = ?, max_mp = ?, current_sp = ?, max_sp = ?"
+		args = append(args, r.CurrentHP, r.MaxHP, r.CurrentMP, r.MaxMP, r.CurrentSP, r.MaxSP)
 	}
 	query += " WHERE id = ? AND exp = ? AND level = ?"
 	args = append(args, r.Character, r.ExpectedExp, r.ExpectedLevel)
@@ -328,12 +360,12 @@ func SaveExperience(_ *rpc.Client, r *character.ExperienceReq, s *character.Expe
 	return nil
 }
 
-// SaveVitals persists the current and maximum HP/MP after a runtime
+// SaveVitals persists the current and maximum HP/MP/SP after a runtime
 // recalculation.
 func SaveVitals(_ *rpc.Client, r *character.VitalsRequest, s *character.VitalsResponse) error {
 	s.Result = false
 	if r == nil || r.Character <= 0 || r.MaxHP == 0 || r.CurrentHP > r.MaxHP ||
-		r.MaxMP == 0 || r.CurrentMP > r.MaxMP {
+		r.MaxMP == 0 || r.CurrentMP > r.MaxMP || r.CurrentSP > r.MaxSP {
 		return errors.New("invalid character vitals update")
 	}
 
@@ -343,8 +375,8 @@ func SaveVitals(_ *rpc.Client, r *character.VitalsRequest, s *character.VitalsRe
 	}
 
 	if _, err := db.Exec(
-		"UPDATE characters SET current_hp = ?, max_hp = ?, current_mp = ?, max_mp = ? WHERE id = ?",
-		r.CurrentHP, r.MaxHP, r.CurrentMP, r.MaxMP, r.Character,
+		"UPDATE characters SET current_hp = ?, max_hp = ?, current_mp = ?, max_mp = ?, current_sp = ?, max_sp = ? WHERE id = ?",
+		r.CurrentHP, r.MaxHP, r.CurrentMP, r.MaxMP, r.CurrentSP, r.MaxSP, r.Character,
 	); err != nil {
 		return err
 	}
@@ -509,6 +541,33 @@ func LoadWarehouse(db *sqlx.DB, id int32) inventory.Inventory {
 	}
 
 	return warehouse
+}
+
+// LoadCashInventory loads cash items that have not yet been received into the
+// character's normal inventory.
+func loadCashInventory(db *sqlx.DB, id int32) []cashinventory.Item {
+	items := make([]cashinventory.Item, 0)
+	rows, err := db.Queryx(
+		"SELECT cash_id, kind, opt, duration_idx "+
+			"FROM characters_cash_inventory WHERE id = ? ORDER BY cash_id", id)
+	if err != nil {
+		log.Error("[DATABASE]", err)
+		return items
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var item cashinventory.Item
+		if err := rows.StructScan(&item); err != nil {
+			log.Error("[DATABASE]", err)
+			return items
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		log.Error("[DATABASE]", err)
+	}
+	return items
 }
 
 // LoadSkills Database Call

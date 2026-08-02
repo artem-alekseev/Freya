@@ -29,6 +29,8 @@ const (
 	DeleteCharacter     = "DeleteCharacter"
 	SetSlotOrder        = "SetSlotOrder"
 	LoadCharacterData   = "LoadCharacterData"
+	OpenQuest           = "OpenQuest"
+	SaveQuestUI         = "SaveQuestUI"
 	SaveExperience      = "SaveExperience"
 	SaveSkillExperience = "SaveSkillExperience"
 	SaveStat            = "SaveStat"
@@ -47,11 +49,17 @@ const (
 	PurchaseItem      = "PurchaseItem"
 	SellItems         = "SellItems"
 	StackItem         = "StackItem"
+	ConsumeItem       = "ConsumeItem"
 	RemoveItem        = "RemoveItem"
 	SwapItem          = "SwapItem"
 	MoveItem          = "MoveItem"
 	StorageMove       = "StorageMove"
 	EnchantItem       = "EnchantItem"
+	ForceCoreEnchant  = "ForceCoreEnchant"
+	AttachItem        = "AttachItem"
+	LoadCashInventory = "LoadCashInventory"
+	AddCashItems      = "AddCashItems"
+	UseCashItem       = "UseCashItem"
 )
 
 // Skill related RPC's

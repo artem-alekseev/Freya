@@ -40,6 +40,37 @@ type EnchantResponse struct {
 	Result bool
 }
 
+// ForceCoreEnchantRequest atomically updates the target option and consumes
+// the submitted scrolls and force cores.
+type ForceCoreEnchantRequest struct {
+	Server         byte
+	Character      int32
+	Target         Item
+	NewTarget      Item
+	RandomScroll   *Item
+	SpecificScroll *Item
+	Cores          []Item
+}
+
+type ForceCoreEnchantResponse struct {
+	Result bool
+}
+
+// AttachRequest transforms the target item with the source item and consumes
+// the source atomically in the World database.
+type AttachRequest struct {
+	Server    byte
+	Character int32
+	Source    Item
+	Target    Item
+	NewKind   uint32
+	NewTarget *Item
+}
+
+type AttachResponse struct {
+	Result bool
+}
+
 type PurchaseRequest struct {
 	Server    byte
 	Character int32

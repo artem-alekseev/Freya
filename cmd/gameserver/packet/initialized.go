@@ -3,6 +3,7 @@ package packet
 import (
 	"strings"
 
+	"github.com/ubis/Freya/cmd/gameserver/clientdata"
 	"github.com/ubis/Freya/cmd/gameserver/context"
 	"github.com/ubis/Freya/share/event"
 	"github.com/ubis/Freya/share/models/character"
@@ -67,7 +68,8 @@ func Initialized(session *network.Session, reader *network.Reader) {
 
 	hpChanged := c.RecalculateHP()
 	mpChanged := c.RecalculateMP()
-	if hpChanged || mpChanged {
+	spChanged := c.RecalculateSP()
+	if hpChanged || mpChanged || spChanged {
 		saveCharacterVitals(&c)
 	}
 
@@ -237,9 +239,12 @@ func Initialized(session *network.Session, reader *network.Reader) {
 	// set-up RPC and data inside links to sync with the database
 	c.Links.Setup(g_RPCHandler, c.Id, byte(g_ServerSettings.ServerId))
 
+	ctx.CashInventory.Init(res.CashInventory)
+
 	ctx.Mutex.Lock()
 	ctx.Char = &c
 	ctx.Warehouse = res.Warehouse
+	ctx.ActiveQuests = makeActiveQuestSlots(res.Quests)
 	worldManager := ctx.WorldManager
 	ctx.Mutex.Unlock()
 
@@ -258,11 +263,29 @@ func Initialized(session *network.Session, reader *network.Reader) {
 	event.Trigger(event.PlayerJoin, session)
 }
 
+func makeActiveQuestSlots(quests []character.ActiveQuest) [context.QuestSlotCount]context.ActiveQuest {
+	var slots [context.QuestSlotCount]context.ActiveQuest
+	for _, active := range quests {
+		if active.QuestID == 0 || active.Slot >= context.QuestSlotCount {
+			continue
+		}
+		if slots[active.Slot].QuestID != 0 {
+			continue
+		}
+		slots[active.Slot] = active
+	}
+	return slots
+}
+
 // Uninitialze Packet
 func Uninitialze(session *network.Session, reader *network.Reader) {
 	_ = reader.ReadUint16() // index
 	_ = reader.ReadByte()   // map id
 	_ = reader.ReadByte()   // log out
+
+	if ctx, err := context.Parse(session); err == nil {
+		resetBattleMode(session, ctx)
+	}
 
 	SaveCharacterPosition(session)
 	// The character list is reused while the TCP session remains connected.
@@ -291,26 +314,41 @@ func Uninitialze(session *network.Session, reader *network.Reader) {
 
 // MessageEvnt Packet
 func MessageEvnt(session *network.Session, reader *network.Reader) {
-	_ = reader.ReadUint16()
-	msglen := reader.ReadUint16()
-	_ = reader.ReadInt16()
-	_ = reader.ReadByte() // client message type
-
 	const messageHeaderSize = 10
-	const messageFieldsSize = 7 // data length, message length, reserved, message type
+	const dataLengthSize = 2
+	if int(reader.Size) < messageHeaderSize+dataLengthSize {
+		log.Errorf("Invalid MessageEvnt packet size: %d", reader.Size)
+		return
+	}
+
+	dataLen := reader.ReadUint16()
+	available := int(reader.Size) - messageHeaderSize - dataLengthSize
+	if int(dataLen) > available {
+		log.Errorf("Invalid MessageEvnt payload: data=%d available=%d packet=%d", dataLen, available, reader.Size)
+		return
+	}
+
+	data := reader.ReadBytes(int(dataLen))
+	log.Debugf("MessageEvnt raw payload: dataLen=%d bytes=% X", dataLen, data)
+
+	if len(data) < 5 {
+		log.Errorf("Invalid MessageEvnt message data: length=%d", len(data))
+		return
+	}
+
+	msglen := uint16(data[0]) | uint16(data[1])<<8
 	if msglen < 3 {
 		log.Errorf("Invalid MessageEvnt length: %d", msglen)
 		return
 	}
 
 	textLen := int(msglen) - 3
-	available := int(reader.Size) - messageHeaderSize - messageFieldsSize
-	if textLen > available {
-		log.Errorf("Invalid MessageEvnt payload: text=%d available=%d packet=%d", textLen, available, reader.Size)
+	if textLen > len(data)-5 {
+		log.Errorf("Invalid MessageEvnt text length: text=%d available=%d", textLen, len(data)-5)
 		return
 	}
 
-	msg := reader.ReadString(textLen)
+	msg := string(data[5 : 5+textLen])
 
 	if strings.HasPrefix(msg, "#") {
 		parts := strings.Split(msg, " ")
@@ -330,7 +368,7 @@ func MessageEvnt(session *network.Session, reader *network.Reader) {
 		return
 	}
 
-	pkt := SendMessage(session, msg)
+	pkt := notifyMessage(session, data)
 	if pkt != nil {
 		world.BroadcastSessionPacket(session, pkt)
 	}
@@ -338,7 +376,10 @@ func MessageEvnt(session *network.Session, reader *network.Reader) {
 
 // WarpCommand packet
 func WarpCommand(session *network.Session, reader *network.Reader) {
-	warpId := reader.ReadByte()
+	npcIndex := reader.ReadByte()
+	slotIndex := reader.ReadUint16()
+	warpArgument := reader.ReadUint32()
+	log.Debugf("WarpCommand: npc=%d slot=%d argument=%d", npcIndex, slotIndex, warpArgument)
 
 	ctx, err := context.Parse(session)
 	if err != nil {
@@ -358,10 +399,48 @@ func WarpCommand(session *network.Session, reader *network.Reader) {
 		return
 	}
 
-	warp := world.FindWarp(warpId)
-	if warp == nil {
-		log.Error("Unable to find warp:", warpId)
+	var warpPoint clientdata.WarpPoint
+	var found bool
+	switch npcIndex {
+	case 61: // NPCSIDX_NAVI: GPS uses the server warp index directly.
+		points := clientdata.WarpPoints()
+		if int(warpArgument) < len(points) {
+			warpPoint = points[warpArgument]
+			found = true
+		}
+	case 62: // NPCSIDX_RETN: return to the nation-specific city point.
+		warpPoint, found = clientdata.FindReturnPoint(world.GetId(), ctx.Char.Nation)
+	case 56: // NPCSIDS_BPNT: starting point or a map transition.
+		// This command carries 0xffff in its union. The client route is
+		// selected by the slot/order index from cabal.dec's warp_npc table.
+		warpPoint, found = clientdata.FindMapTransition(world.GetId(), slotIndex)
+		if !found {
+			warpPoint, found = clientdata.FindStartingPoint(world.GetId(), ctx.Char.Nation)
+		}
+	default:
+		// Normal NPC transitions are resolved directly from cabal.dec's
+		// source-world/NPC/order table.
+		warpPoint, found = clientdata.FindNPCWarp(world.GetId(), npcIndex, warpArgument)
+	}
+	if !found {
+		log.Errorf("Unable to resolve warp: npc=%d argument=%d world=%d", npcIndex, warpArgument, world.GetId())
 		return
+	}
+
+	warp := context.Warp{
+		Id:    warpPoint.ID,
+		World: warpPoint.World,
+		Code:  warpPoint.Code,
+		Fee:   warpPoint.Fee,
+		Level: warpPoint.Level,
+	}
+	for i, location := range warpPoint.Locations {
+		warp.Location[i] = context.WarpLocation{X: location.X, Y: location.Y}
+	}
+
+	location := warp.Location[0]
+	if ctx.Char.Nation >= 1 && ctx.Char.Nation <= 2 {
+		location = warp.Location[ctx.Char.Nation]
 	}
 
 	newWorld := wm.FindWorld(warp.World)
@@ -370,36 +449,67 @@ func WarpCommand(session *network.Session, reader *network.Reader) {
 		return
 	}
 
+	if npcIndex == 62 {
+		item := ctx.Char.Inventory.Get(slotIndex)
+		if !clientdata.IsReturnStone(item.Kind) || item.Option <= 0 {
+			log.Warningf("Rejected return stone use: character %d, item %d, slot %d", ctx.Char.Id, item.Kind, slotIndex)
+			return
+		}
+
+		updatedItem, consumed, err := ctx.Char.Inventory.ConsumeOne(slotIndex)
+		if err != nil {
+			log.Errorf("Unable to consume return stone: character %d, slot %d: %s", ctx.Char.Id, slotIndex, err.Error())
+			return
+		}
+		if !consumed {
+			log.Warningf("Return stone was not consumed: character %d, slot %d", ctx.Char.Id, slotIndex)
+			return
+		}
+		log.Debugf("Consumed return stone: character %d, slot %d, remaining %d", ctx.Char.Id, slotIndex, updatedItem.Option)
+	}
+
+	ctx.Mutex.RLock()
+	exp := ctx.Char.Exp
+	alz := ctx.Char.Alz
+	ctx.Mutex.RUnlock()
+
+	ctx.Mutex.Lock()
+	ctx.Char.World = byte(warp.World)
+	ctx.Char.X = byte(location.X)
+	ctx.Char.Y = byte(location.Y)
+	ctx.Char.BeginX = int16(location.X)
+	ctx.Char.BeginY = int16(location.Y)
+	ctx.Char.EndX = int16(location.X)
+	ctx.Char.EndY = int16(location.Y)
+	ctx.Mutex.Unlock()
+
 	pkt := network.NewWriter(WARPCOMMAND)
-	pkt.WriteInt16(warp.Location[0].X) // pos x
-	pkt.WriteInt16(warp.Location[0].Y) // pos y
-	pkt.WriteInt32(0)                  // exp
-	pkt.WriteInt32(0)                  // axp
-	pkt.WriteInt32(0)                  // alz
-	pkt.WriteInt32(0)                  // unk
-	pkt.WriteInt16(session.UserIdx)
-	pkt.WriteInt16(0x0100)
-	pkt.WriteInt32(0x08)
-	pkt.WriteByte(0)
+	pkt.WriteInt16(location.X)             // pos x
+	pkt.WriteInt16(location.Y)             // pos y
+	pkt.WriteInt64(exp)                    // exp (TEXP)
+	pkt.WriteInt64(alz)                    // alz (TALZ)
+	pkt.WriteInt32(int32(session.UserIdx)) // user index
+	pkt.WriteInt32(0x08)                   // WorldRegion::Neutral
+	pkt.WriteByte(0)                       // SERVER_RESULT::COMPLETE
 	pkt.WriteInt32(warp.World)
 	pkt.WriteInt32(0)
 	pkt.WriteInt32(0)
 
-	world.ExitWorld(session, server.DelUserWarp)
+	if warp.World == world.GetId() {
+		// WorldSvr handles a same-world warp by moving the character and
+		// relinking its cell, not by removing and re-adding the world object.
+		world.AdjustCell(session)
+		// Acknowledge the warp before sending the snapshot. The client keeps
+		// resending WarpCommand until this packet has been received.
+		session.Send(pkt)
+		world.RefreshPlayer(session)
+		world.BroadcastSessionPacket(session, NewUserSingle(session, server.NewUserWarp))
+	} else {
+		world.ExitWorld(session, server.DelUserWarp)
+		newWorld.EnterWorld(session)
+		session.Send(pkt)
+	}
 
-	session.Send(pkt)
-
-	ctx.Mutex.Lock()
-	ctx.Char.World = byte(warp.World)
-	ctx.Char.X = byte(warp.Location[0].X)
-	ctx.Char.Y = byte(warp.Location[0].Y)
-	ctx.Char.BeginX = int16(warp.Location[0].X)
-	ctx.Char.BeginY = int16(warp.Location[0].Y)
-	ctx.Char.EndX = int16(warp.Location[0].X)
-	ctx.Char.EndY = int16(warp.Location[0].Y)
-	ctx.Mutex.Unlock()
-
-	newWorld.EnterWorld(session)
 	SaveCharacterPosition(session)
 }
 
@@ -503,5 +613,62 @@ func DelUserList(session *network.Session, reason server.DelUserType) *network.W
 }
 
 func SendMessage(session *network.Session, msg string) *network.Writer {
-	return SystemMessgEx(msg)
+	characterID, err := messageSender(session)
+	if err != nil {
+		log.Error("Unable to get character for chat message:", err)
+		return nil
+	}
+
+	data := buildNormalMessagePayload(msg)
+	return newMessageNotification(characterID, data)
+}
+
+func notifyMessage(session *network.Session, data []byte) *network.Writer {
+	characterID, err := messageSender(session)
+	if err != nil {
+		log.Error("Unable to get character for chat notification:", err)
+		return nil
+	}
+
+	return newMessageNotification(characterID, data)
+}
+
+func messageSender(session *network.Session) (int32, error) {
+	ctx, err := context.Parse(session)
+	if err != nil {
+		return 0, err
+	}
+
+	ctx.Mutex.RLock()
+	defer ctx.Mutex.RUnlock()
+
+	return ctx.Char.Id, nil
+}
+
+func newMessageNotification(characterID int32, data []byte) *network.Writer {
+	if len(data) > 0xFFFF {
+		log.Errorf("Chat message payload is too large: %d", len(data))
+		return nil
+	}
+
+	packet := network.NewWriter(NFY_MESSAGEEVNT)
+	packet.WriteInt32(characterID)
+	packet.WriteUint16(uint16(len(data)))
+	packet.WriteBytes(data)
+	return packet
+}
+
+func buildNormalMessagePayload(msg string) []byte {
+	data := make([]byte, len(msg)+7)
+	messageLength := len(msg) + 3
+	data[0] = byte(messageLength)
+	data[1] = byte(messageLength >> 8)
+	data[2] = 0xFE
+	data[3] = 0xFE
+	data[4] = 0xA0
+	copy(data[5:], msg)
+	// The client expects two trailing bytes after the message text.
+	data[len(data)-2] = 0
+	data[len(data)-1] = 0
+	return data
 }

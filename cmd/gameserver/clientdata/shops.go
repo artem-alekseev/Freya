@@ -8,6 +8,13 @@ import (
 )
 
 type ShopItem struct {
+	// Kind is the complete item kind index written to the character
+	// inventory. Older cabal.dec files call this attribute item_id, while
+	// newer files may expose it as kind/kind_idx.
+	Kind uint32
+
+	// ItemID is kept as a compatibility alias for callers that still use the
+	// old name. It has the same value as Kind after parsing.
 	ItemID uint32
 	Option int32
 	Price  uint64
@@ -114,9 +121,22 @@ func parseShopItem(element xml.StartElement) (int32, ShopItem, error) {
 	if err != nil {
 		return 0, ShopItem{}, err
 	}
-	itemID, err := uintAttribute(element, "item_id", 32)
+
+	itemKind, found, err := optionalUintAttribute(element, "kind", 32)
 	if err != nil {
 		return 0, ShopItem{}, err
+	}
+	if !found {
+		itemKind, found, err = optionalUintAttribute(element, "kind_idx", 32)
+		if err != nil {
+			return 0, ShopItem{}, err
+		}
+	}
+	if !found {
+		itemKind, err = uintAttribute(element, "item_id", 32)
+		if err != nil {
+			return 0, ShopItem{}, err
+		}
 	}
 	option, err := intAttribute(element, "option", 32)
 	if err != nil {
@@ -131,7 +151,8 @@ func parseShopItem(element xml.StartElement) (int32, ShopItem, error) {
 	}
 
 	return int32(slot), ShopItem{
-		ItemID: uint32(itemID),
+		Kind:   uint32(itemKind),
+		ItemID: uint32(itemKind),
 		Option: int32(option),
 		Price:  price,
 	}, nil

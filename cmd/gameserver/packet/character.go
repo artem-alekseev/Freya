@@ -309,13 +309,88 @@ func SkillToActs(session *network.Session, reader *network.Reader) {
 func SkillToUser(session *network.Session, reader *network.Reader) {
 	// seems like there are 2 types of messages
 	switch reader.Size {
+	case 15:
+		// short self-target skills, including Battle Mode 1
+		handleShortStyleSkill(session, reader)
 	case 19:
 		// astral & style related
 		handleStyleSkill(session, reader)
 	case 17:
 		// dash/fade & movement related
 		handleMoveSkill(session, reader)
+	default:
+		log.Warningf("Ignoring SkillToUser with unsupported size: %d", reader.Size)
 	}
+}
+
+func handleShortStyleSkill(session *network.Session, reader *network.Reader) {
+	skill := reader.ReadUint16()
+	slot := uint16(reader.ReadByte())
+	value := reader.ReadUint16()
+
+	ctx, err := context.Parse(session)
+	if err != nil {
+		log.Error(err.Error())
+		return
+	}
+
+	if battleMode, handled := handleBattleModeSkill(ctx, skill, slot, value); handled {
+		if !battleMode.Accepted {
+			sendBattleModeFailure(session, battleMode)
+			return
+		}
+
+		responseValue := battleMode.Start
+		pkt := network.NewWriter(SKILLTOUSER)
+		pkt.WriteUint16(skill)
+		pkt.WriteUint16(battleMode.CurrentMP)
+		pkt.WriteUint16(responseValue)
+		session.Send(pkt)
+
+		if battleMode.Save {
+			saveContextVitals(ctx)
+		}
+		if battleMode.Start != 0 {
+			startBattleModeDrain(session, ctx)
+		} else {
+			session.RemoveJob(battleModeDrainJob)
+		}
+		sendManaUpdate(session, battleMode.CurrentMP)
+		sendSpiritUpdate(session, battleMode.CurrentSP)
+
+		pkt = network.NewWriter(NFY_SKILLTOUSER)
+		pkt.WriteUint16(skill)
+		pkt.WriteInt32(battleMode.ID)
+		pkt.WriteUint32(battleMode.Style)
+		pkt.WriteByte(battleMode.LiveStyle)
+		pkt.WriteByte(battleMode.StyleEx)
+		pkt.WriteUint16(responseValue)
+		ctx.World.BroadcastSessionPacket(session, pkt)
+		return
+	}
+
+	ctx.Mutex.RLock()
+	id := ctx.Char.Id
+	mp := ctx.Char.CurrentMP
+	style := ctx.Char.Style.Get()
+	liveStyle := ctx.Char.LiveStyle
+	ctx.Mutex.RUnlock()
+
+	pkt := network.NewWriter(SKILLTOUSER)
+	pkt.WriteUint16(skill)
+	pkt.WriteUint16(mp)
+	pkt.WriteUint16(value)
+	session.Send(pkt)
+
+	pkt = network.NewWriter(NFY_SKILLTOUSER)
+	pkt.WriteUint16(skill)
+	pkt.WriteUint32(id)
+	pkt.WriteUint32(style)
+	pkt.WriteByte(liveStyle)
+	pkt.WriteByte(0x02)
+	pkt.WriteUint16(value)
+
+	ctx.World.BroadcastSessionPacket(session, pkt)
 }
 
 func SkillToTarget(session *network.Session, reader *network.Reader) {
