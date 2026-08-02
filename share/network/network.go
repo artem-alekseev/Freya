@@ -118,6 +118,19 @@ func (n *Network) GetSession(idx uint16) *Session {
 	return nil
 }
 
+// Sessions returns a snapshot of currently connected sessions. Callers can
+// inspect session data without holding the Network lock.
+func (n *Network) Sessions() []*Session {
+	n.lock.RLock()
+	defer n.lock.RUnlock()
+
+	result := make([]*Session, 0, len(n.clients))
+	for _, session := range n.clients {
+		result = append(result, session)
+	}
+	return result
+}
+
 // Verifies user specified by index, key and sets it's database index
 func (n *Network) VerifyUser(i uint16, k uint32, ip string, db_idx int32) bool {
 	n.lock.Lock()

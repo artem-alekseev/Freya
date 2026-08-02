@@ -125,6 +125,7 @@ func AttckToMobs(session *network.Session, reader *network.Reader) {
 			sendLevelUpEvent(session, characterID)
 		}
 		if classRankUp {
+			sendClassRankUpdate(session, character.ClassRankForLevel(currentLevel))
 			sendClassRankUpEvent(session, characterID)
 		}
 	}
@@ -132,11 +133,62 @@ func AttckToMobs(session *network.Session, reader *network.Reader) {
 
 func calculateCharacterAttack(ctx *context.Context) character.AttackStats {
 	ctx.Mutex.RLock()
-	defer ctx.Mutex.RUnlock()
+	if ctx.Char == nil {
+		ctx.Mutex.RUnlock()
+		return character.AttackStats{}
+	}
+	copyCharacter := *ctx.Char
+	ctx.Mutex.RUnlock()
 
-	attack := ctx.Char.CalculateAttack()
-	attack.PhysicalMax += weaponAttack(ctx.Char.Equipment.Get(uint16(inventory.RightHand)))
-	attack.PhysicalMax += weaponAttack(ctx.Char.Equipment.Get(uint16(inventory.LeftHand)))
+	copyCharacter.STR = addBuffToStat(copyCharacter.STR,
+		ctx.BuffValue(45)+ctx.BuffValue(48))
+	copyCharacter.INT = addBuffToStat(copyCharacter.INT,
+		ctx.BuffValue(46)+ctx.BuffValue(48))
+	copyCharacter.DEX = addBuffToStat(copyCharacter.DEX,
+		ctx.BuffValue(47)+ctx.BuffValue(48))
+
+	attack := calculateCharacterAttackFromCharacter(&copyCharacter)
+	attack.PhysicalMax += ctx.BuffValue(3) + ctx.BuffValue(23) +
+		ctx.BuffValue(113) + ctx.BuffValue(115)
+	attack.MagicAttack += ctx.BuffValue(4) + ctx.BuffValue(24) +
+		ctx.BuffValue(113) + ctx.BuffValue(115)
+	if attack.PhysicalMax < 1 {
+		attack.PhysicalMax = 1
+	}
+	if attack.MagicAttack < 1 {
+		attack.MagicAttack = 1
+	}
+	attack.PhysicalMin = attack.PhysicalMax*4/5 + attack.PhysicalMax/20
+	if attack.PhysicalMin > attack.PhysicalMax {
+		attack.PhysicalMin = attack.PhysicalMax
+	}
+	return attack
+}
+
+func addBuffToStat(value uint32, delta int) uint32 {
+	if delta >= 0 {
+		if uint64(value)+uint64(delta) > uint64(^uint32(0)) {
+			return ^uint32(0)
+		}
+		return value + uint32(delta)
+	}
+	decrease := uint32(-delta)
+	if decrease > value {
+		return 0
+	}
+	return value - decrease
+}
+
+func calculateCharacterAttackFromCharacter(c *character.Character) character.AttackStats {
+	if c == nil {
+		return character.AttackStats{}
+	}
+
+	attack := c.CalculateAttack()
+	attack.PhysicalMax += weaponAttack(c.Equipment.Get(uint16(inventory.RightHand)))
+	attack.PhysicalMax += weaponAttack(c.Equipment.Get(uint16(inventory.LeftHand)))
+	attack.MagicAttack += weaponMagicAttack(c.Equipment.Get(uint16(inventory.RightHand)))
+	attack.MagicAttack += weaponMagicAttack(c.Equipment.Get(uint16(inventory.LeftHand)))
 	attack.PhysicalMin = attack.PhysicalMax*4/5 + attack.PhysicalMax/20
 
 	return attack
@@ -151,8 +203,17 @@ func weaponAttack(item inventory.Item) int {
 	return attack
 }
 
+func weaponMagicAttack(item inventory.Item) int {
+	attack, ok := clientdata.FindWeaponMagicAttack(item.Kind)
+	if !ok {
+		return 0
+	}
+
+	return attack
+}
+
 func sendCharacterAttackValue(session *network.Session, attack character.AttackStats) {
-	session.Send(SendMessage(session, fmt.Sprintf("Attack: %d", attack.PhysicalMax)))
+	session.Send(SendMessage(session, fmt.Sprintf("Attack: %d Magic attack: %d", attack.PhysicalMax, attack.MagicAttack)))
 }
 
 func newAttackToMobsResult(

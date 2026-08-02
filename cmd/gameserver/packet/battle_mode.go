@@ -242,6 +242,7 @@ func resetBattleMode(session *network.Session, ctx *context.Context) {
 	ctx.BattleModeEndTimer = nil
 	ctx.BattleModeGeneration++
 	ctx.BattleMode = context.BattleModeState{}
+	ctx.ComboActive = false
 	ctx.Mutex.Unlock()
 	if timer != nil {
 		timer.Stop()

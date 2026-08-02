@@ -24,19 +24,22 @@ const (
 
 // Character related RPC's
 const (
-	LoadCharacters      = "LoadCharacters"
-	CreateCharacter     = "CreateCharacter"
-	DeleteCharacter     = "DeleteCharacter"
-	SetSlotOrder        = "SetSlotOrder"
-	LoadCharacterData   = "LoadCharacterData"
-	OpenQuest           = "OpenQuest"
-	SaveQuestUI         = "SaveQuestUI"
-	SaveExperience      = "SaveExperience"
-	SaveSkillExperience = "SaveSkillExperience"
-	SaveStat            = "SaveStat"
-	SaveVitals          = "SaveVitals"
-	SavePosition        = "SavePosition"
-	LoadMobDropList     = "LoadMobDropList"
+	LoadCharacters       = "LoadCharacters"
+	CreateCharacter      = "CreateCharacter"
+	DeleteCharacter      = "DeleteCharacter"
+	SetSlotOrder         = "SetSlotOrder"
+	LoadCharacterData    = "LoadCharacterData"
+	OpenQuest            = "OpenQuest"
+	SaveQuestUI          = "SaveQuestUI"
+	SaveQuestNPCFlags    = "SaveQuestNPCFlags"
+	CloseQuest           = "CloseQuest"
+	SaveExperience       = "SaveExperience"
+	SaveSkillExperience  = "SaveSkillExperience"
+	SaveStat             = "SaveStat"
+	SaveStatDistribution = "SaveStatDistribution"
+	SaveVitals           = "SaveVitals"
+	SavePosition         = "SavePosition"
+	LoadMobDropList      = "LoadMobDropList"
 )
 
 // Inventory related RPC's

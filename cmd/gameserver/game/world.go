@@ -229,6 +229,12 @@ func (w *World) Initialize(manager *WorldManager) {
 
 // EnterWorld adds a player session to the current world cell.
 func (w *World) EnterWorld(session *network.Session) {
+	w.EnterWorldWithReason(session, server.NewUserInit)
+}
+
+// EnterWorldWithReason adds a player session to the current world cell and
+// announces it with the requested client notification type.
+func (w *World) EnterWorldWithReason(session *network.Session, reason server.NewUserType) {
 	cell := w.getCurrentCell(session)
 	if cell == nil {
 		log.Error("Unable to get current cell")
@@ -244,7 +250,7 @@ func (w *World) EnterWorld(session *network.Session) {
 	column, row := cell.GetId()
 
 	// notify other nearby cells about new player with radius of -2/+2
-	pkt := packet.NewUserSingle(session, server.NewUserInit)
+	pkt := packet.NewUserSingle(session, reason)
 	w.sendToNearbyCells(pkt, column, row, 2)
 
 	// notify player about nearby cell states

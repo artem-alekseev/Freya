@@ -298,7 +298,7 @@ func LoadCharacterData(c *rpc.Client, r *character.DataReq, s *character.DataRes
 func LoadQuests(db *sqlx.DB, id int32) []character.ActiveQuest {
 	quests := make([]character.ActiveQuest, 0, character.QuestSlotCount)
 	rows, err := db.Queryx(
-		"SELECT quest_id, slot, transmuter_slot, show_desc, expand "+
+		"SELECT quest_id, slot, transmuter_slot, show_desc, expand, npc_flags "+
 			"FROM characters_quests WHERE id = ? ORDER BY slot", id)
 	if err != nil {
 		log.Error("[DATABASE]", err)
@@ -451,6 +451,77 @@ func SaveStat(_ *rpc.Client, r *character.StatRequest, s *character.StatResponse
 		s.INT++
 	}
 	s.PNT--
+	s.Result = true
+	return nil
+}
+
+// SaveStatDistribution atomically spends several free stat points across
+// STR, DEX and INT in one operation.
+func SaveStatDistribution(_ *rpc.Client, r *character.StatDistributionRequest, s *character.StatDistributionResponse) error {
+	s.Result = false
+	if r == nil || r.Character <= 0 || r.STR == 0 && r.DEX == 0 && r.INT == 0 {
+		return errors.New("invalid stat distribution")
+	}
+
+	distributed := uint64(r.STR) + uint64(r.DEX) + uint64(r.INT)
+	if distributed > uint64(^uint32(0)) {
+		return errors.New("invalid stat distribution amount")
+	}
+
+	db := g_DatabaseManager.Get(r.Server)
+	if db == nil {
+		return errors.New("game database is not configured")
+	}
+
+	tx, err := db.Beginx()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var current struct {
+		STR uint32 `db:"str_stat"`
+		DEX uint32 `db:"dex_stat"`
+		INT uint32 `db:"int_stat"`
+		PNT uint32 `db:"pnt_stat"`
+	}
+	if err := tx.Get(&current,
+		"SELECT str_stat, dex_stat, int_stat, pnt_stat FROM characters WHERE id = ? FOR UPDATE",
+		r.Character); err != nil {
+		return err
+	}
+	if current.PNT != r.ExpectedPNT || distributed > uint64(current.PNT) {
+		return nil
+	}
+	if uint64(current.STR)+uint64(r.STR) > uint64(^uint32(0)) ||
+		uint64(current.DEX)+uint64(r.DEX) > uint64(^uint32(0)) ||
+		uint64(current.INT)+uint64(r.INT) > uint64(^uint32(0)) {
+		return errors.New("stat value overflow")
+	}
+
+	result, err := tx.Exec(
+		"UPDATE characters SET str_stat = str_stat + ?, dex_stat = dex_stat + ?, "+
+			"int_stat = int_stat + ?, pnt_stat = pnt_stat - ? WHERE id = ? AND pnt_stat = ?",
+		r.STR, r.DEX, r.INT, distributed, r.Character, r.ExpectedPNT,
+	)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows != 1 {
+		return nil
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
+	s.STR = current.STR + r.STR
+	s.DEX = current.DEX + r.DEX
+	s.INT = current.INT + r.INT
+	s.PNT = current.PNT - uint32(distributed)
 	s.Result = true
 	return nil
 }

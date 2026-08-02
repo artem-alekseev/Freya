@@ -124,7 +124,8 @@ CREATE TABLE `characters_quests` (
   `slot` tinyint(3) UNSIGNED NOT NULL,
   `transmuter_slot` smallint(5) UNSIGNED NOT NULL DEFAULT '65535',
   `show_desc` tinyint(3) UNSIGNED NOT NULL DEFAULT '0',
-  `expand` tinyint(3) UNSIGNED NOT NULL DEFAULT '0'
+  `expand` tinyint(3) UNSIGNED NOT NULL DEFAULT '0',
+  `npc_flags` smallint(5) UNSIGNED NOT NULL DEFAULT '0'
 ) ENGINE=InnoDB DEFAULT CHARSET=latin1 ROW_FORMAT=COMPACT;
 
 -- --------------------------------------------------------

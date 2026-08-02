@@ -24,7 +24,6 @@ const (
 func notifyStorageExchange(session *network.Session, result bool) {
 	packet := network.NewWriter(STORAGE_EXCHANGE_MOVE)
 	packet.WriteBool(result)
-	packet.WriteInt32(0)
 
 	session.Send(packet)
 }
@@ -43,6 +42,8 @@ func StorageExchangeMove(session *network.Session, reader *network.Reader) {
 
 	deleteSlot := uint16(sourceSlotValue)
 	createSlot := uint16(targetSlotValue)
+	log.Debugf("StorageExchangeMove: source=%d slot=%d target=%d slot=%d",
+		sourceType, deleteSlot, targetType, createSlot)
 
 	var id int32
 
@@ -61,12 +62,33 @@ func StorageExchangeMove(session *network.Session, reader *network.Reader) {
 	switch {
 	case sourceType == Equipment && targetType == Inventory:
 		// from equipment to inventory
-		ok, err := ctx.Char.Equipment.UnEquipItem(deleteSlot, createSlot, ctx.Char.Inventory)
+		sourceSlot := deleteSlot
+		if ctx.Char.Equipment.Get(sourceSlot).Kind == 0 {
+			switch sourceSlot {
+			case uint16(inventory.RightHand):
+				if ctx.Char.Equipment.Get(uint16(inventory.LeftHand)).Kind != 0 {
+					sourceSlot = uint16(inventory.LeftHand)
+				}
+			case uint16(inventory.LeftHand):
+				if ctx.Char.Equipment.Get(uint16(inventory.RightHand)).Kind != 0 {
+					sourceSlot = uint16(inventory.RightHand)
+				}
+			}
+		}
+		if sourceSlot != deleteSlot {
+			log.Debugf("StorageExchangeMove: resolving empty equipment slot %d to %d",
+				deleteSlot, sourceSlot)
+		}
+
+		ok, err := ctx.Char.Equipment.UnEquipItem(sourceSlot, createSlot, ctx.Char.Inventory)
 
 		notifyStorageExchange(session, ok)
 
 		if err != nil {
 			log.Error(err.Error())
+			return
+		}
+		if !ok {
 			return
 		}
 
@@ -76,13 +98,10 @@ func StorageExchangeMove(session *network.Session, reader *network.Reader) {
 
 		ctx.World.BroadcastSessionPacket(session, pkt)
 
-		// with one-handed dual weapons we need to move from left hand to
-		// the right, if right-hand weapon was removed
-		// todo: check for dual-handed weapons and ignore
-		if deleteSlot == inventory.RightHand {
-			// switch weapon
-			ctx.Char.Equipment.MoveItem(inventory.LeftHand, inventory.RightHand)
-		}
+		// Keep the remaining weapon in its original slot. WorldSvr normalizes
+		// primary weapon slots internally, but this client continues to send
+		// the original slot in the next storage request and does not consume
+		// that server-side relocation notification.
 	case sourceType == Inventory && targetType == Equipment:
 		// from inventory to equipment
 		ok, err := ctx.Char.Equipment.EquipItem(deleteSlot, createSlot, ctx.Char.Inventory)
@@ -94,13 +113,14 @@ func StorageExchangeMove(session *network.Session, reader *network.Reader) {
 			log.Error(err.Error())
 			return
 		}
+		if !ok {
+			return
+		}
 
 		pkt := network.NewWriter(NFY_ITEM_EQUIP)
 		pkt.WriteInt32(id)
-		pkt.WriteInt32(item.Kind)
-		pkt.WriteInt16(item.Slot)
-		pkt.WriteInt32(0)
-		pkt.WriteByte(0)
+		pkt.WriteUint32(item.Kind)
+		pkt.WriteUint16(item.Slot)
 
 		ctx.World.BroadcastSessionPacket(session, pkt)
 	case sourceType == Equipment && targetType == Equipment:
@@ -114,6 +134,9 @@ func StorageExchangeMove(session *network.Session, reader *network.Reader) {
 			log.Error(err.Error())
 			return
 		}
+		if !ok {
+			return
+		}
 
 		pkt := network.NewWriter(NFY_ITEM_UNEQUIP)
 		pkt.WriteInt32(id)
@@ -122,10 +145,8 @@ func StorageExchangeMove(session *network.Session, reader *network.Reader) {
 
 		pkt = network.NewWriter(NFY_ITEM_EQUIP)
 		pkt.WriteInt32(id)
-		pkt.WriteInt32(item.Kind)
-		pkt.WriteInt16(item.Slot)
-		pkt.WriteInt32(0)
-		pkt.WriteByte(0)
+		pkt.WriteUint32(item.Kind)
+		pkt.WriteUint16(item.Slot)
 		ctx.World.BroadcastSessionPacket(session, pkt)
 	case sourceType == Inventory && targetType == Inventory:
 		// moving item in inventory

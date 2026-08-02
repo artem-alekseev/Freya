@@ -18,6 +18,7 @@ type CellHandler interface {
 // WorldHandler defines the interface for interacting with a game world.
 type WorldHandler interface {
 	EnterWorld(session *network.Session)
+	EnterWorldWithReason(session *network.Session, reason server.NewUserType)
 	ExitWorld(session *network.Session, reason server.DelUserType)
 	AdjustCell(session *network.Session)
 	RefreshPlayer(session *network.Session)

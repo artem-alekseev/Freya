@@ -13,28 +13,55 @@ import (
 	"github.com/ubis/Freya/share/rpc"
 )
 
+const newTargetUserPacketSize = 14 // header + int32 user index
+
 // NewTargetUser Packet
 func NewTargetUser(session *network.Session, reader *network.Reader) {
-	sessionId := reader.ReadUint16()
+	if reader.Size < newTargetUserPacketSize {
+		log.Warningf("[NEWTARGETUSER] invalid packet size: %d", reader.Size)
+		sendNewTargetUserResult(session, 0x01, 0, 0)
+		return
+	}
 
-	pSession := g_NetworkManager.GetSession(sessionId)
+	targetUserIndex := reader.ReadInt32()
+	if targetUserIndex < 0 || targetUserIndex > int32(^uint16(0)) {
+		log.Warningf("[NEWTARGETUSER] invalid user index: %d", targetUserIndex)
+		sendNewTargetUserResult(session, 0x01, 0, 0)
+		return
+	}
+
+	pSession := g_NetworkManager.GetSession(uint16(targetUserIndex))
+	if pSession == nil {
+		log.Warningf("[NEWTARGETUSER] target session not found: user=%d", targetUserIndex)
+		sendNewTargetUserResult(session, 0x01, 0, 0)
+		return
+	}
+
 	ctx, err := context.Parse(pSession)
 	if err != nil {
 		log.Error(err.Error())
+		sendNewTargetUserResult(session, 0x01, 0, 0)
 		return
 	}
 
 	ctx.Mutex.RLock()
+	if ctx.Char == nil {
+		ctx.Mutex.RUnlock()
+		sendNewTargetUserResult(session, 0x01, 0, 0)
+		return
+	}
 	currentHP, maxHP := ctx.Char.CurrentHP, ctx.Char.MaxHP
 	ctx.Mutex.RUnlock()
 
-	var packet = network.NewWriter(NEW_TARGET_USER)
+	sendNewTargetUserResult(session, 0x00, currentHP, maxHP)
+}
 
-	packet.WriteByte(0x00)
-	packet.WriteInt16(currentHP)
-	packet.WriteInt16(maxHP)
-
-	session.Send(packet)
+func sendNewTargetUserResult(session *network.Session, result byte, currentHP, maxHP uint16) {
+	pkt := network.NewWriter(NEW_TARGET_USER)
+	pkt.WriteByte(result)
+	pkt.WriteUint16(currentHP)
+	pkt.WriteUint16(maxHP)
+	session.Send(pkt)
 }
 
 func EndTargetUser(session *network.Session, reader *network.Reader) {
@@ -318,6 +345,9 @@ func SkillToUser(session *network.Session, reader *network.Reader) {
 	case 17:
 		// dash/fade & movement related
 		handleMoveSkill(session, reader)
+	case 32:
+		// one-target user skill: BOOL movement, position, timing, main-target flag and target
+		handleTargetedUserSkill(session, reader)
 	default:
 		log.Warningf("Ignoring SkillToUser with unsupported size: %d", reader.Size)
 	}
@@ -394,42 +424,7 @@ func handleShortStyleSkill(session *network.Session, reader *network.Reader) {
 }
 
 func SkillToTarget(session *network.Session, reader *network.Reader) {
-	skill := reader.ReadUint16()
-	_ = reader.ReadByte() // slot
-	unk1 := reader.ReadInt16()
-	unk2 := reader.ReadInt32()
-
-	ctx, err := context.Parse(session)
-	if err != nil {
-		log.Error(err.Error())
-		return
-	}
-
-	ctx.Mutex.RLock()
-	id := ctx.Char.Id
-	mp := ctx.Char.CurrentMP
-	style := ctx.Char.Style.Get()
-	liveStyle := ctx.Char.LiveStyle
-	ctx.Mutex.RUnlock()
-
-	pkt := network.NewWriter(SKILLTOUSER)
-	pkt.WriteUint16(skill)
-	pkt.WriteUint16(mp)
-	pkt.WriteInt16(unk1)
-	pkt.WriteInt32(unk2)
-
-	session.Send(pkt)
-
-	pkt = network.NewWriter(NFY_SKILLTOUSER)
-	pkt.WriteUint16(skill)
-	pkt.WriteUint32(id)
-	pkt.WriteUint32(style)
-	pkt.WriteByte(liveStyle)
-	pkt.WriteByte(0x02)
-	pkt.WriteInt16(unk1)
-	pkt.WriteInt32(unk2)
-
-	ctx.World.BroadcastSessionPacket(session, pkt)
+	handleBasicBuff(session, reader)
 }
 
 func handleStyleSkill(session *network.Session, reader *network.Reader) {
@@ -550,6 +545,7 @@ func SetPlayerLevel(session *network.Session, level int) {
 
 	ctx.World.BroadcastSessionPacket(session, pkt)
 	if currentClassRank > previousClassRank {
+		sendClassRankUpdate(session, currentClassRank)
 		sendClassRankUpEvent(session, id)
 	}
 

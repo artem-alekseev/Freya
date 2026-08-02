@@ -117,13 +117,13 @@ func SkillToMobs(session *network.Session, reader *network.Reader) {
 	skillInfo, hasSkillInfo := clientdata.FindSkillDamage(wSkillIdx)
 	skillDamage := attack.PhysicalMax
 	if hasSkillInfo {
-		skillDamage = skillInfo.Calculate(attack.PhysicalMax, 0, skillLevel)
+		skillDamage = skillInfo.Calculate(attack.PhysicalMax, attack.MagicAttack, skillLevel)
 	} else {
 		log.Warningf("SkillToMobs: missing client damage data for skill %d, using physical attack %d",
 			wSkillIdx, skillDamage)
 	}
-	log.Debugf("SkillToMobs: skill=%d level=%d baseAttack=%d damage=%d",
-		wSkillIdx, skillLevel, attack.PhysicalMax, skillDamage)
+	log.Debugf("SkillToMobs: skill=%d level=%d physicalAttack=%d magicAttack=%d damage=%d",
+		wSkillIdx, skillLevel, attack.PhysicalMax, attack.MagicAttack, skillDamage)
 
 	validTargets := targets[:0]
 	var gainedExperience uint64
@@ -165,6 +165,10 @@ func SkillToMobs(session *network.Session, reader *network.Reader) {
 	}
 	targets = validTargets
 	spiritChanged := addSpiritPoints(ctx, uint32(len(targets)))
+	if spiritChanged || manaChanged {
+		saveContextVitals(ctx)
+	}
+
 	skillExperience := skillExperienceResult{}
 	if hasSkillInfo && len(targets) > 0 {
 		skillExperience = addSkillExperience(ctx, skillInfo.Type, uint32(skillInfo.Experience())*skillExperienceMultiplier)
@@ -177,9 +181,6 @@ func SkillToMobs(session *network.Session, reader *network.Reader) {
 	currentSP := ctx.Char.CurrentSP
 	experience := ctx.Char.Exp
 	ctx.Mutex.RUnlock()
-	if spiritChanged || manaChanged {
-		saveContextVitals(ctx)
-	}
 
 	//log.Debugf(
 	//	"SkillToMob: skillID=%d, slot=%d, isMoving=%d, pos=(%d,%d), timing=%d, mainTarget=%d, targets=%d",
@@ -234,6 +235,7 @@ func SkillToMobs(session *network.Session, reader *network.Reader) {
 		sendLevelUpEvent(session, id)
 	}
 	if experienceUpdated && classRankUp {
+		sendClassRankUpdate(session, character.ClassRankForLevel(currentLevel))
 		sendClassRankUpEvent(session, id)
 	}
 	if skillExperience.SwordRankUp {
@@ -243,6 +245,9 @@ func SkillToMobs(session *network.Session, reader *network.Reader) {
 	if skillExperience.MagicRankUp {
 		sendSkillRankUpdate(session, 2, skillExperience.MagicRank)
 		sendClassRankUpEvent(session, id)
+	}
+	if skillExperience.RankLimitReached {
+		sendSkillRankLimitHook(session, skillExperience.RankLimitRank, skillExperience.RankLimitType)
 	}
 	if skillExperience.SwordRankUp || skillExperience.MagicRankUp {
 		sendHealthUpdate(session, skillExperience.CurrentHP)
@@ -321,11 +326,20 @@ func learnedSkillLevel(ctx *context.Context, skillID uint16) byte {
 	return 1
 }
 
+const characterExperienceMultiplier uint64 = 30
+
 func addExperience(ctx *context.Context, gained uint64) (uint16, uint16, bool, bool) {
 	const statPointsPerLevel = 5
 
 	if gained == 0 {
 		return 0, 0, false, false
+	}
+	// Character experience is multiplied here for both normal and skill kills.
+	// Skill experience has its own multiplier and is not affected by this value.
+	if gained > math.MaxUint64/characterExperienceMultiplier {
+		gained = math.MaxUint64
+	} else {
+		gained *= characterExperienceMultiplier
 	}
 
 	ctx.Mutex.Lock()
@@ -403,18 +417,64 @@ func addExperience(ctx *context.Context, gained uint64) (uint16, uint16, bool, b
 }
 
 type skillExperienceResult struct {
-	Applied     uint16
-	SwordRankUp bool
-	MagicRankUp bool
-	SwordRank   byte
-	MagicRank   byte
-	CurrentHP   uint16
-	CurrentMP   uint16
+	Applied          uint16
+	SwordRankUp      bool
+	MagicRankUp      bool
+	SwordRank        byte
+	MagicRank        byte
+	CurrentHP        uint16
+	CurrentMP        uint16
+	RankLimitReached bool
+	RankLimitRank    byte
+	RankLimitType    clientdata.SkillRankLimitType
 }
 
-const skillExperienceMultiplier uint32 = 1000
+const skillExperienceMultiplier uint32 = 30
 
 func addSkillExperience(ctx *context.Context, skillType byte, gained uint32) skillExperienceResult {
+	if skillType != 1 && skillType != 2 {
+		return skillExperienceResult{}
+	}
+
+	// SkillToMobs carries one common skill-exp value. WorldSvr applies that
+	// value through IncSkillExp, which advances both sword and magic progress.
+	swordResult := addSkillExperienceForType(ctx, 1, gained)
+	magicResult := addSkillExperienceForType(ctx, 2, gained)
+	result := skillExperienceResult{
+		Applied:          swordResult.Applied,
+		SwordRankUp:      swordResult.SwordRankUp,
+		MagicRankUp:      magicResult.MagicRankUp,
+		SwordRank:        magicResult.SwordRank,
+		MagicRank:        magicResult.MagicRank,
+		CurrentHP:        magicResult.CurrentHP,
+		CurrentMP:        magicResult.CurrentMP,
+		RankLimitReached: swordResult.RankLimitReached || magicResult.RankLimitReached,
+		RankLimitRank:    magicResult.RankLimitRank,
+		RankLimitType:    magicResult.RankLimitType,
+	}
+	if magicResult.Applied > result.Applied {
+		result.Applied = magicResult.Applied
+	}
+	if result.SwordRank == 0 {
+		result.SwordRank = swordResult.SwordRank
+	}
+	if result.MagicRank == 0 {
+		result.MagicRank = swordResult.MagicRank
+	}
+	if result.CurrentHP == 0 {
+		result.CurrentHP = swordResult.CurrentHP
+	}
+	if result.CurrentMP == 0 {
+		result.CurrentMP = swordResult.CurrentMP
+	}
+	if !result.RankLimitReached {
+		result.RankLimitRank = swordResult.RankLimitRank
+		result.RankLimitType = swordResult.RankLimitType
+	}
+	return result
+}
+
+func addSkillExperienceForType(ctx *context.Context, skillType byte, gained uint32) skillExperienceResult {
 	result := skillExperienceResult{}
 	if gained == 0 || (skillType != 1 && skillType != 2) {
 		return result
@@ -445,6 +505,12 @@ func addSkillExperience(ctx *context.Context, skillType byte, gained uint32) ski
 		} else {
 			updated.MagicRank = currentRank
 		}
+	}
+	allowedRank, rankLimitType := clientdata.SkillRankLimitFor(updated.Level, updated.Style.MasteryLevel)
+	if currentRank > allowedRank {
+		log.Debugf("Skill rank is above level limit: character=%d level=%d rank=%d allowed=%d type=%d",
+			updated.Id, updated.Level, currentRank, allowedRank, skillType)
+		return result
 	}
 	progress, ok := clientdata.FindSkillRankProgress(updated.Style.BattleStyle, currentRank, skillType)
 	if !ok {
@@ -488,6 +554,26 @@ func addSkillExperience(ctx *context.Context, skillType byte, gained uint32) ski
 		if currentRank >= 10 {
 			acceptedExp -= uint32(totalExp)
 			totalExp = 0
+			break
+		}
+		if currentRank >= allowedRank {
+			// WorldSvr keeps the skill at the rank-up threshold until the
+			// character reaches the required level. Roll back this point and
+			// preserve a full skill-exp bar so subsequent hits cannot bypass
+			// the level restriction.
+			if currentPoint > 0 {
+				currentPoint--
+			}
+			if currentRankExp > 0 {
+				currentRankExp--
+			}
+			totalExp = uint32(requiredExp)
+			acceptedExp = 0
+			result.RankLimitReached = true
+			result.RankLimitRank = allowedRank
+			result.RankLimitType = rankLimitType
+			log.Debugf("Skill rank level limit reached: character=%d level=%d rank=%d allowed=%d type=%d",
+				updated.Id, updated.Level, currentRank, allowedRank, skillType)
 			break
 		}
 
@@ -572,6 +658,8 @@ func addSkillExperience(ctx *context.Context, skillType byte, gained uint32) ski
 	if err := g_RPCHandler.Call(rpc.SaveSkillExperience, &req, &res); err != nil || !res.Result {
 		if err != nil {
 			log.Errorf("Unable to save skill experience for character %d: %s", req.Character, err.Error())
+		} else {
+			log.Errorf("Unable to save skill experience for character %d: master rejected optimistic update", req.Character)
 		}
 		return skillExperienceResult{}
 	}
@@ -625,6 +713,13 @@ func sendSkillRankUpdate(session *network.Session, skillType, rank byte) {
 	session.Send(pkt)
 }
 
+func sendSkillRankLimitHook(session *network.Session, rank byte, limitType clientdata.SkillRankLimitType) {
+	pkt := network.NewWriter(NFY_RANKLIMITHOOK)
+	pkt.WriteInt32(int32(rank))
+	pkt.WriteInt32(int32(limitType))
+	session.Send(pkt)
+}
+
 func sendLevelUpEvent(session *network.Session, characterID int32) {
 	ctx, err := context.Parse(session)
 	if err != nil {
@@ -647,6 +742,15 @@ func sendClassRankUpEvent(session *network.Session, characterID int32) {
 	pkt.WriteByte(2) // EVT_RANKUP
 	pkt.WriteInt32(characterID)
 	ctx.World.BroadcastSessionPacket(session, pkt)
+}
+
+// sendClassRankUpdate follows WorldSvr's S2C_SMASTUPEVNT response. The
+// character event only plays the rank-up animation; this packet updates the
+// rank value shown in the client's character window.
+func sendClassRankUpdate(session *network.Session, rank byte) {
+	pkt := network.NewWriter(SMASTUPEVNT)
+	pkt.WriteByte(rank)
+	session.Send(pkt)
 }
 
 func sendExperienceUpdate(session *network.Session, experience uint64) {

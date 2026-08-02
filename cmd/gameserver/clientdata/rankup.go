@@ -27,6 +27,24 @@ type SkillRankBonus struct {
 	INT uint32
 }
 
+// SkillRankLimitType describes which value currently prevents the next skill
+// rank from being opened. These values match Character::Rank::Limit in
+// WorldSvr and are also sent to the client by NFY_RANKLIMITHOOK.
+type SkillRankLimitType byte
+
+const (
+	SkillRankLimitNone SkillRankLimitType = iota
+	SkillRankLimitCharacterLevel
+	SkillRankLimitBattleStyleLevel
+)
+
+// SkillRankLimit is one row from cabal.dec's rank_limit section.
+type SkillRankLimit struct {
+	Rank             byte
+	CharacterLevel   uint16
+	BattleStyleLevel byte
+}
+
 type skillRankKey struct {
 	style byte
 	rank  byte
@@ -39,6 +57,7 @@ type rankConditionValues struct {
 
 var skillRankProgressData = make(map[skillRankKey]SkillRankProgress)
 var skillRankBonusData = make(map[[2]byte]SkillRankBonus)
+var skillRankLimitData = make(map[byte]SkillRankLimit)
 
 var skillRankClassNames = map[byte]string{
 	1: "twohand",
@@ -59,6 +78,28 @@ func FindSkillRankProgress(style, rank, skillType byte) (SkillRankProgress, bool
 
 	progress, ok := skillRankProgressData[skillRankKey{style: style, rank: rank}]
 	return progress, ok
+}
+
+// SkillRankLimitFor returns the highest sword/magic rank allowed by the
+// character level and battle-style level.
+func SkillRankLimitFor(level uint16, battleStyleLevel byte) (byte, SkillRankLimitType) {
+	limit, ok := skillRankLimitData[battleStyleLevel]
+	if !ok {
+		return maxSkillRank, SkillRankLimitBattleStyleLevel
+	}
+
+	if uint32(level) < uint32(limit.CharacterLevel)+10 {
+		return limit.Rank, SkillRankLimitCharacterLevel
+	}
+	return limit.Rank, SkillRankLimitBattleStyleLevel
+}
+
+// MaxSkillRankForLevel returns the highest sword/magic rank available for the
+// character's level and battle-style level. The data is loaded from
+// cabal.dec's rank_limit section during client-data initialization.
+func MaxSkillRankForLevel(level uint16, battleStyleLevel byte) byte {
+	rank, _ := SkillRankLimitFor(level, battleStyleLevel)
+	return rank
 }
 
 // FindSkillRankBonus returns the WorldSvr bonus applied when the specified
@@ -220,6 +261,75 @@ func parseSkillRankData(cabalData []byte) (map[skillRankKey]SkillRankProgress, m
 	}
 
 	return progress, bonuses, nil
+}
+
+func parseSkillRankLimitData(cabalData []byte) (map[byte]SkillRankLimit, error) {
+	xmlStart := bytes.Index(cabalData, []byte("<cabal>"))
+	if xmlStart < 0 {
+		return nil, fmt.Errorf("cabal.dec does not contain a cabal XML section")
+	}
+
+	decoder := xml.NewDecoder(bytes.NewReader(cabalData[xmlStart:]))
+	limits := make(map[byte]SkillRankLimit)
+	inRankLimit := false
+
+	for {
+		token, err := decoder.Token()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("parse skill rank limit data: %w", err)
+		}
+
+		switch element := token.(type) {
+		case xml.StartElement:
+			switch element.Name.Local {
+			case "rank_limit":
+				inRankLimit = true
+			case "limit":
+				if !inRankLimit {
+					continue
+				}
+
+				rank, err := uintAttribute(element, "rank", 8)
+				if err != nil || rank < 1 || rank > uint64(maxSkillRank) {
+					if err == nil {
+						err = fmt.Errorf("invalid skill rank limit rank %d", rank)
+					}
+					return nil, err
+				}
+				characterLevel, err := uintAttribute(element, "level", 16)
+				if err != nil {
+					return nil, err
+				}
+				battleStyleLevel, err := uintAttribute(element, "bs_lv", 8)
+				if err != nil || battleStyleLevel == 0 {
+					if err == nil {
+						err = fmt.Errorf("invalid skill rank limit battle-style level %d", battleStyleLevel)
+					}
+					return nil, err
+				}
+				if _, exists := limits[byte(battleStyleLevel)]; exists {
+					return nil, fmt.Errorf("duplicate skill rank limit battle-style level %d", battleStyleLevel)
+				}
+				limits[byte(battleStyleLevel)] = SkillRankLimit{
+					Rank:             byte(rank),
+					CharacterLevel:   uint16(characterLevel),
+					BattleStyleLevel: byte(battleStyleLevel),
+				}
+			}
+		case xml.EndElement:
+			if element.Name.Local == "rank_limit" {
+				inRankLimit = false
+			}
+		}
+	}
+
+	if len(limits) == 0 {
+		return nil, fmt.Errorf("cabal.dec does not contain skill rank limits")
+	}
+	return limits, nil
 }
 
 func styleForSkillClass(className string) byte {

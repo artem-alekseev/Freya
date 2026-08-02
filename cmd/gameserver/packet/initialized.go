@@ -15,6 +15,18 @@ import (
 	"github.com/ubis/Freya/share/log"
 )
 
+const userObjectType uint32 = 0x01000000
+
+func userObjectIndex(session *network.Session) uint32 {
+	return userObjectType | uint32(session.UserIdx)
+}
+
+const (
+	warpNPCDeadPK byte = 54 // NPCSIDX_DEAD_PK: death by another player
+	warpNPCDead   byte = 63 // NPCSIDX_DEAD: normal death
+	warpNPCGM     byte = 52 // NPCSIDX_GM: Ctrl+right-click GM warp
+)
+
 // Initialized Packet
 func Initialized(session *network.Session, reader *network.Reader) {
 	charId := reader.ReadInt32()
@@ -72,7 +84,6 @@ func Initialized(session *network.Session, reader *network.Reader) {
 	if hpChanged || mpChanged || spChanged {
 		saveCharacterVitals(&c)
 	}
-
 	// load additional character data
 	req := character.DataReq{
 		Server: byte(g_ServerSettings.ServerId),
@@ -89,6 +100,8 @@ func Initialized(session *network.Session, reader *network.Reader) {
 	inv, invlen := res.Inventory.Serialize()
 	sk, sklen := res.Skills.Serialize()
 	sl, sllen := res.Links.Serialize()
+	activeQuests := makeActiveQuestSlots(res.Quests)
+	activeQuestCount := countActiveQuestSlots(activeQuests)
 
 	pkt := network.NewWriter(INITIALIZED)
 	pkt.WriteBytes(make([]byte, 57))
@@ -101,7 +114,7 @@ func Initialized(session *network.Session, reader *network.Reader) {
 	pkt.WriteUint32(0x8501A8C0)
 	pkt.WriteUint16(0x985A)
 	pkt.WriteInt32(0x01)
-	pkt.WriteInt32(0x0100001F)
+	pkt.WriteUint32(userObjectIndex(session))
 
 	pkt.WriteUint16(c.X)   // +
 	pkt.WriteUint16(c.Y)   // +
@@ -180,11 +193,17 @@ func Initialized(session *network.Session, reader *network.Reader) {
 	pkt.WriteInt16(invlen) // +
 	pkt.WriteInt16(sklen)  // +
 	pkt.WriteInt16(sllen)  // +
-	pkt.WriteInt16(0x00)
-	pkt.WriteByte(0x00)   // blessing bead count
-	pkt.WriteByte(0x00)   // active quest count
-	pkt.WriteUint16(0x00) // period item count
-	pkt.WriteBytes(make([]byte, 1023))
+	pkt.WriteInt16(0x00)   // assistant count (low 2 bytes)
+	pkt.WriteByte(0x00)    // assistant count (third byte)
+	pkt.WriteByte(0x00)    // assistant count (high byte)
+	pkt.WriteUint16(0x00)  // soul ability point total
+
+	// The client reads bQuestNum at packet offset 0x147. The fixed tail
+	// starts at offset 0x13E, immediately after soulAbilityPointTotal.
+	// Keep all intermediate fields zero and place only the quest count here.
+	userDataTail := make([]byte, 1023)
+	userDataTail[0x147-0x13E] = activeQuestCount
+	pkt.WriteBytes(userDataTail)
 
 	pkt.WriteBytes(make([]byte, 128)) // quest dungeon flags
 	pkt.WriteBytes(make([]byte, 128)) // mission dungeon flags
@@ -215,6 +234,7 @@ func Initialized(session *network.Session, reader *network.Reader) {
 	pkt.WriteBytes(inv)            //+
 	pkt.WriteBytes(sk)             //+
 	pkt.WriteBytes(sl)             //+
+	writeActiveQuestData(pkt, activeQuests)
 	pkt.WriteBytes(make([]byte, 163))
 
 	session.Send(pkt)
@@ -244,7 +264,7 @@ func Initialized(session *network.Session, reader *network.Reader) {
 	ctx.Mutex.Lock()
 	ctx.Char = &c
 	ctx.Warehouse = res.Warehouse
-	ctx.ActiveQuests = makeActiveQuestSlots(res.Quests)
+	ctx.ActiveQuests = activeQuests
 	worldManager := ctx.WorldManager
 	ctx.Mutex.Unlock()
 
@@ -275,6 +295,36 @@ func makeActiveQuestSlots(quests []character.ActiveQuest) [context.QuestSlotCoun
 		slots[active.Slot] = active
 	}
 	return slots
+}
+
+func countActiveQuestSlots(quests [context.QuestSlotCount]context.ActiveQuest) byte {
+	var count byte
+	for _, quest := range quests {
+		if quest.QuestID != 0 {
+			count++
+		}
+	}
+	return count
+}
+
+func writeActiveQuestData(pkt *network.Writer, quests [context.QuestSlotCount]context.ActiveQuest) {
+	for slot, quest := range quests {
+		if quest.QuestID == 0 {
+			continue
+		}
+
+		// QUESTLIST_DATA0 in S2C_INITIALIZED is packed as:
+		// quest id, NPC flag, UI state, slot, then mission counters.
+		pkt.WriteUint16(quest.QuestID)
+		pkt.WriteUint16(quest.NPCFlags)
+		pkt.WriteByte(quest.ShowDesc)
+		pkt.WriteByte(quest.Expand)
+		pkt.WriteByte(byte(slot))
+
+		for counter := byte(0); counter < clientdata.QuestMissionCount(quest.QuestID); counter++ {
+			pkt.WriteByte(0)
+		}
+	}
 }
 
 // Uninitialze Packet
@@ -376,6 +426,13 @@ func MessageEvnt(session *network.Session, reader *network.Reader) {
 
 // WarpCommand packet
 func WarpCommand(session *network.Session, reader *network.Reader) {
+	const warpCommandPacketSize = 29 // C2S_WARPCOMMAND, including GMWarpData
+
+	if reader.Size < 17 {
+		log.Warningf("WarpCommand: invalid packet size %d", reader.Size)
+		return
+	}
+
 	npcIndex := reader.ReadByte()
 	slotIndex := reader.ReadUint16()
 	warpArgument := reader.ReadUint32()
@@ -402,6 +459,30 @@ func WarpCommand(session *network.Session, reader *network.Reader) {
 	var warpPoint clientdata.WarpPoint
 	var found bool
 	switch npcIndex {
+	case warpNPCGM:
+		if reader.Size != warpCommandPacketSize {
+			log.Warningf("WarpCommand: invalid GM warp packet size %d", reader.Size)
+			return
+		}
+
+		// WorldSvr treats the union as WORD position and decodes it as
+		// HIBYTE=X, LOBYTE=Y. The remaining fields describe the GM warp
+		// context; NPCSIDX_GM itself always stays in the current world.
+		gmWorld := reader.ReadInt32()
+		gmDungeon := reader.ReadInt32()
+		gmTarget := reader.ReadInt32()
+		position := uint16(warpArgument)
+		warpPoint = clientdata.WarpPoint{
+			World: world.GetId(),
+			Locations: [3]clientdata.WarpLocation{
+				{X: byte(position >> 8), Y: byte(position)},
+				{X: byte(position >> 8), Y: byte(position)},
+				{X: byte(position >> 8), Y: byte(position)},
+			},
+		}
+		found = true
+		log.Debugf("GM warp: world=%d dungeon=%d target=%d x=%d y=%d",
+			gmWorld, gmDungeon, gmTarget, warpPoint.Locations[0].X, warpPoint.Locations[0].Y)
 	case 61: // NPCSIDX_NAVI: GPS uses the server warp index directly.
 		points := clientdata.WarpPoints()
 		if int(warpArgument) < len(points) {
@@ -410,6 +491,11 @@ func WarpCommand(session *network.Session, reader *network.Reader) {
 		}
 	case 62: // NPCSIDX_RETN: return to the nation-specific city point.
 		warpPoint, found = clientdata.FindReturnPoint(world.GetId(), ctx.Char.Nation)
+	case warpNPCDead, warpNPCDeadPK:
+		// The client uses the dead NPC index and sends zero in the union field.
+		// The destination is the current map's dead_warp from cabal.dec, not an
+		// entry in warp_npc.
+		warpPoint, found = clientdata.FindStartingPoint(world.GetId(), ctx.Char.Nation)
 	case 56: // NPCSIDS_BPNT: starting point or a map transition.
 		// This command carries 0xffff in its union. The client route is
 		// selected by the slot/order index from cabal.dec's warp_npc table.
@@ -449,6 +535,32 @@ func WarpCommand(session *network.Session, reader *network.Reader) {
 		return
 	}
 
+	revived := false
+	var revivedHP, revivedMP uint16
+	if npcIndex == warpNPCDead || npcIndex == warpNPCDeadPK {
+		ctx.Mutex.Lock()
+		if ctx.Char.CurrentHP != 0 {
+			currentHP := ctx.Char.CurrentHP
+			ctx.Mutex.Unlock()
+			log.Warningf("Rejected death warp for living character %d: hp=%d", ctx.Char.Id, currentHP)
+			return
+		}
+
+		// WorldSvr's RecycleUserByDead restores both resources completely for
+		// the normal/dead-PK warp. Battle mode is also stopped on death.
+		ctx.Char.CurrentHP = ctx.Char.MaxHP
+		ctx.Char.CurrentMP = ctx.Char.MaxMP
+		revivedHP = ctx.Char.CurrentHP
+		revivedMP = ctx.Char.CurrentMP
+		ctx.Mutex.Unlock()
+
+		resetBattleMode(session, ctx)
+		if !saveContextVitals(ctx) {
+			log.Warningf("Unable to save revived vitals for character %d", ctx.Char.Id)
+		}
+		revived = true
+	}
+
 	if npcIndex == 62 {
 		item := ctx.Char.Inventory.Get(slotIndex)
 		if !clientdata.IsReturnStone(item.Kind) || item.Option <= 0 {
@@ -484,30 +596,50 @@ func WarpCommand(session *network.Session, reader *network.Reader) {
 	ctx.Mutex.Unlock()
 
 	pkt := network.NewWriter(WARPCOMMAND)
-	pkt.WriteInt16(location.X)             // pos x
-	pkt.WriteInt16(location.Y)             // pos y
-	pkt.WriteInt64(exp)                    // exp (TEXP)
-	pkt.WriteInt64(alz)                    // alz (TALZ)
-	pkt.WriteInt32(int32(session.UserIdx)) // user index
-	pkt.WriteInt32(0x08)                   // WorldRegion::Neutral
-	pkt.WriteByte(0)                       // SERVER_RESULT::COMPLETE
+	pkt.WriteInt16(location.X)                // pos x
+	pkt.WriteInt16(location.Y)                // pos y
+	pkt.WriteInt64(exp)                       // exp (TEXP)
+	pkt.WriteInt64(alz)                       // alz (TALZ)
+	pkt.WriteUint32(userObjectIndex(session)) // user object index
+	pkt.WriteInt32(0x08)                      // WorldRegion::Neutral
+	pkt.WriteByte(0)                          // SERVER_RESULT::COMPLETE
 	pkt.WriteInt32(warp.World)
 	pkt.WriteInt32(0)
 	pkt.WriteInt32(0)
 
 	if warp.World == world.GetId() {
-		// WorldSvr handles a same-world warp by moving the character and
-		// relinking its cell, not by removing and re-adding the world object.
-		world.AdjustCell(session)
-		// Acknowledge the warp before sending the snapshot. The client keeps
-		// resending WarpCommand until this packet has been received.
-		session.Send(pkt)
-		world.RefreshPlayer(session)
-		world.BroadcastSessionPacket(session, NewUserSingle(session, server.NewUserWarp))
+		if revived {
+			// A dead character is already rendered as a corpse by nearby clients.
+			// Remove that entry from the old cell before announcing the revived
+			// character in the new one, otherwise the corpse remains visible.
+			world.ExitWorld(session, server.DelUserWarp)
+			newWorld.EnterWorldWithReason(session, server.NewUserWarp)
+		} else {
+			// WorldSvr handles a same-world warp by moving the character and
+			// relinking its cell, not by removing and re-adding the world object.
+			world.AdjustCell(session)
+			// Acknowledge the warp before sending the snapshot. The client keeps
+			// resending WarpCommand until this packet has been received.
+			session.Send(pkt)
+			world.RefreshPlayer(session)
+			world.BroadcastSessionPacket(session, NewUserSingle(session, server.NewUserWarp))
+		}
+		if revived {
+			// Send the warp acknowledgement after the old corpse has been
+			// removed and the live character has been linked again.
+			session.Send(pkt)
+		}
 	} else {
 		world.ExitWorld(session, server.DelUserWarp)
 		newWorld.EnterWorld(session)
 		session.Send(pkt)
+	}
+
+	if revived {
+		sendHealthUpdate(session, revivedHP)
+		sendManaUpdate(session, revivedMP)
+		log.Infof("Character %d revived at dead warp: world=%d x=%d y=%d hp=%d mp=%d",
+			ctx.Char.Id, warp.World, location.X, location.Y, revivedHP, revivedMP)
 	}
 
 	SaveCharacterPosition(session)
@@ -531,17 +663,16 @@ func fillPlayerInfo(pkt *network.Writer, session *network.Session) {
 	}
 	eq, eqlen := c.Equipment.SerializeEx()
 	pkt.WriteUint32(c.Id)
-	pkt.WriteUint32(session.UserIdx)
+	pkt.WriteUint32(userObjectIndex(session))
 	pkt.WriteUint32(c.Level)
 	pkt.WriteInt32(0x01C2)    // might be dwMoveBgnTime
 	pkt.WriteUint16(c.BeginX) // start
 	pkt.WriteUint16(c.BeginY)
 	pkt.WriteUint16(c.EndX) // end
 	pkt.WriteUint16(c.EndY)
-	pkt.WriteByte(5) // pk - LVL
-	pkt.WriteInt16(0)
-	pkt.WriteInt16(0)
-	pkt.WriteInt16(0)
+	pkt.WriteUint16(0) // PK level (normal character)
+	pkt.WriteByte(c.Nation)
+	pkt.WriteInt32(0) // reserved
 	pkt.WriteInt32(c.Style.Get())
 	pkt.WriteByte(c.LiveStyle) // animation id aka "live style"
 	pkt.WriteInt16(0)

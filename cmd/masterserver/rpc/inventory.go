@@ -31,11 +31,14 @@ func UnEquipItem(c *rpc.Client, r *inventory.ItemRequest, s *inventory.ItemRespo
 
 	s.Result = false
 
-	_, err := db.MustExec(
+	result, err := db.MustExec(
 		"DELETE FROM characters_equipment WHERE id = ? AND slot = ?",
 		r.Id, r.Item.Slot).RowsAffected()
 	if err != nil {
 		return err
+	}
+	if result == 0 {
+		return errors.New("equipment item was not found")
 	}
 
 	s.Result = true
@@ -107,12 +110,15 @@ func MoveEquipmentItem(c *rpc.Client, r *inventory.ItemRequest, s *inventory.Ite
 
 	s.Result = false
 
-	_, err := db.MustExec(
+	result, err := db.MustExec(
 		"UPDATE characters_equipment SET slot = ? "+
 			"WHERE id = ? AND slot = ?",
 		r.NewItem.Slot, r.Id, r.Item.Slot).RowsAffected()
 	if err != nil {
 		return err
+	}
+	if result == 0 {
+		return errors.New("equipment item was not found")
 	}
 
 	s.Result = true

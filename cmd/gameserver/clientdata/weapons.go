@@ -15,6 +15,7 @@ const (
 	upgradeCoreShift                    = 13
 	itemTypeOffsetInRecord              = 0
 	physicalAttackOffsetInRecord        = 343
+	magicAttackOffsetInRecord           = 347
 	itemGradeOffsetInRecord             = 387
 	// These are the local EP6 item.dec values. They differ from the EP8
 	// template's enum values: type 5 is a one-handed blade, while 4 and 6
@@ -34,8 +35,10 @@ const (
 )
 
 type weaponAttackInfo struct {
-	baseAttack   int
-	upgradeBonus [16]int
+	baseAttack        int
+	baseMagicAttack   int
+	upgradeBonus      [16]int
+	magicUpgradeBonus [16]int
 }
 
 type weaponUpgradeFormula struct {
@@ -142,7 +145,7 @@ func parseWeaponUpgradeFormulas(data []byte) (map[weaponClass][]weaponUpgradeFor
 
 func parseWeaponAttackData(data []byte, layout itemFileLayout, formulas map[weaponClass][]weaponUpgradeFormula) map[uint32]weaponAttackInfo {
 	weapons := make(map[uint32]weaponAttackInfo)
-	if layout.recordSize < physicalAttackOffsetInRecord+4 {
+	if layout.recordSize < magicAttackOffsetInRecord+4 {
 		return weapons
 	}
 
@@ -153,8 +156,9 @@ func parseWeaponAttackData(data []byte, layout itemFileLayout, formulas map[weap
 			continue
 		}
 
-		attack := binary.LittleEndian.Uint32(data[recordStart+physicalAttackOffsetInRecord : recordStart+physicalAttackOffsetInRecord+4])
-		if attack == 0 {
+		physicalAttack := binary.LittleEndian.Uint32(data[recordStart+physicalAttackOffsetInRecord : recordStart+physicalAttackOffsetInRecord+4])
+		magicAttack := binary.LittleEndian.Uint32(data[recordStart+magicAttackOffsetInRecord : recordStart+magicAttackOffsetInRecord+4])
+		if physicalAttack == 0 && magicAttack == 0 {
 			continue
 		}
 
@@ -178,7 +182,19 @@ func parseWeaponAttackData(data []byte, layout itemFileLayout, formulas map[weap
 		for level := 1; level < len(upgradeBonus); level++ {
 			upgradeBonus[level] = upgradeBonus[level-1] + formula.valueA + ((level-1)/3)*formula.valueB
 		}
-		weapons[itemID] = weaponAttackInfo{baseAttack: int(attack), upgradeBonus: upgradeBonus}
+
+		magicUpgradeBonus := [16]int{}
+		if itemClass == weaponClassMagic {
+			for level := 1; level < len(magicUpgradeBonus); level++ {
+				magicUpgradeBonus[level] = magicUpgradeBonus[level-1] + formula.valueA + ((level-1)/3)*formula.valueB
+			}
+		}
+		weapons[itemID] = weaponAttackInfo{
+			baseAttack:        int(physicalAttack),
+			baseMagicAttack:   int(magicAttack),
+			upgradeBonus:      upgradeBonus,
+			magicUpgradeBonus: magicUpgradeBonus,
+		}
 	}
 
 	return weapons
@@ -212,4 +228,21 @@ func FindWeaponAttack(kind uint32) (int, bool) {
 
 	upgradeLevel := int((kind & upgradeCoreMask) >> upgradeCoreShift)
 	return data.baseAttack + data.upgradeBonus[upgradeLevel], true
+}
+
+// FindWeaponMagicAttack returns the magic attack supplied by an equipped
+// magic weapon, including its upgrade level.
+func FindWeaponMagicAttack(kind uint32) (int, bool) {
+	if kind == 0 {
+		return 0, false
+	}
+
+	itemIndex := kind & itemKindIndexMask
+	data, ok := weaponAttackData[itemIndex]
+	if !ok || data.baseMagicAttack == 0 {
+		return 0, false
+	}
+
+	upgradeLevel := int((kind & upgradeCoreMask) >> upgradeCoreShift)
+	return data.baseMagicAttack + data.magicUpgradeBonus[upgradeLevel], true
 }

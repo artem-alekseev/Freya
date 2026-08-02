@@ -22,8 +22,8 @@ type SkillDamageInfo struct {
 	LevelAttackCoef    int
 	BaseAttack         int
 	Type               byte
-	SwordExp           uint16
-	MagicExp           uint16
+	NormalSkillExp     uint16
+	CriticalSkillExp   uint16
 }
 
 var skillDamageData = make(map[uint16]SkillDamageInfo)
@@ -34,14 +34,12 @@ func FindSkillDamage(skillID uint16) (SkillDamageInfo, bool) {
 }
 
 func (info SkillDamageInfo) Experience() uint16 {
-	switch info.Type {
-	case 1:
-		return info.SwordExp
-	case 2:
-		return info.MagicExp
-	default:
-		return 0
-	}
+	return info.NormalSkillExp
+}
+
+// CriticalExperience returns the skill experience for a critical hit.
+func (info SkillDamageInfo) CriticalExperience() uint16 {
+	return info.CriticalSkillExp
 }
 
 // SkillSlotRange returns the client slot range reserved for a skill type.
@@ -68,14 +66,32 @@ func (info SkillDamageInfo) Calculate(physicalAttack, magicAttack int, level byt
 	}
 
 	levelIndex := int(level)
-	damage := (info.PhysicalAttackCoef*physicalAttack +
-		info.MagicAttackCoef*magicAttack +
-		info.LevelAttackCoef*levelIndex +
-		info.BaseAttack) / 10
+	// WorldSvr applies a small skill-level attack-amp delta before the
+	// skill coefficients are evaluated. The delta is added only to the
+	// matching physical or magical attack branch.
+	deltaAmp := skillDeltaAttackAmp(levelIndex)
+	physicalCoef := 10 * info.PhysicalAttackCoef
+	magicCoef := 10 * info.MagicAttackCoef
+	switch info.Type {
+	case 1:
+		physicalCoef += 5 * deltaAmp
+	case 2:
+		magicCoef += 5 * deltaAmp
+	}
+
+	damage := (physicalCoef*physicalAttack +
+		magicCoef*magicAttack +
+		10*info.LevelAttackCoef*levelIndex +
+		10*info.BaseAttack) / 100
 	if damage < 1 {
 		damage = 1
 	}
 	return damage
+}
+
+// skillDeltaAttackAmp mirrors WorldSvr's FORMULA::SKILL::DeltaAMPBySkillLv.
+func skillDeltaAttackAmp(level int) int {
+	return level/10 + level/13 + level/16 + level/19
 }
 
 func parseSkillDamageData(cabalData []byte) (map[uint16]SkillDamageInfo, error) {
@@ -151,8 +167,8 @@ func parseSkillDamageData(cabalData []byte) (map[uint16]SkillDamageInfo, error) 
 					return nil, fmt.Errorf("duplicate skill damage data for skill %d", skillID)
 				}
 				values.Type = skillType
-				values.SwordExp = skillExp1
-				values.MagicExp = skillExp2
+				values.NormalSkillExp = skillExp1
+				values.CriticalSkillExp = skillExp2
 				data[skillID] = values
 			}
 		case xml.EndElement:

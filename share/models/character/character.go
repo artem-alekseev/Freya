@@ -114,6 +114,7 @@ type ActiveQuest struct {
 	TransmuterSlot uint16 `db:"transmuter_slot"`
 	ShowDesc       byte   `db:"show_desc"`
 	Expand         byte   `db:"expand"`
+	NPCFlags       uint16 `db:"npc_flags"`
 }
 
 type OpenQuestReq struct {
@@ -133,6 +134,28 @@ type QuestUIRequest struct {
 }
 
 type QuestUIResponse struct {
+	Result bool
+}
+
+type SaveQuestNPCFlagsReq struct {
+	Server           byte
+	Character        int32
+	Quest            ActiveQuest
+	ExpectedNPCFlags uint16
+}
+
+type SaveQuestNPCFlagsRes struct {
+	Result bool
+}
+
+type CloseQuestReq struct {
+	Server    byte
+	Character int32
+	Quest     ActiveQuest
+	Alz       uint64
+}
+
+type CloseQuestRes struct {
 	Result bool
 }
 
@@ -203,6 +226,23 @@ type StatRequest struct {
 }
 
 type StatResponse struct {
+	Result bool
+	STR    uint32
+	DEX    uint32
+	INT    uint32
+	PNT    uint32
+}
+
+type StatDistributionRequest struct {
+	Server      byte
+	Character   int32
+	STR         uint32
+	DEX         uint32
+	INT         uint32
+	ExpectedPNT uint32
+}
+
+type StatDistributionResponse struct {
 	Result bool
 	STR    uint32
 	DEX    uint32

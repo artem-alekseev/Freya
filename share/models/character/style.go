@@ -18,7 +18,7 @@ func ClassRankForLevel(level uint16) byte {
 		return 1
 	}
 
-	rank := (uint32(level)-1)/10 + 1
+	rank := uint32(level)/10 + 1
 	if rank > 31 {
 		rank = 31
 	}

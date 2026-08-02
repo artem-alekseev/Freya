@@ -98,6 +98,26 @@ func Initialize(directory string) (Stats, error) {
 	if err != nil {
 		return Stats{}, fmt.Errorf("read cabal.dec: %w", err)
 	}
+	questData, err := os.ReadFile(filepath.Join(directory, "quest.dec"))
+	if err != nil {
+		return Stats{}, fmt.Errorf("read quest.dec: %w", err)
+	}
+	parsedQuestMissionCounts, err := parseQuestMissionCounts(questData)
+	if err != nil {
+		return Stats{}, err
+	}
+	parsedQuestNPCActions, err := parseQuestNPCActions(questData)
+	if err != nil {
+		return Stats{}, err
+	}
+	parsedQuestMissionItems, err := parseQuestMissionItems(questData)
+	if err != nil {
+		return Stats{}, err
+	}
+	parsedQuestRewards, err := parseQuestRewards(questData)
+	if err != nil {
+		return Stats{}, err
+	}
 	parsedWarpPoints, err := parseWarpPoints(cabalData)
 	if err != nil {
 		return Stats{}, err
@@ -115,6 +135,10 @@ func Initialize(directory string) (Stats, error) {
 		return Stats{}, err
 	}
 	skillMetadata, err := parseSkillMetaData(cabalData)
+	if err != nil {
+		return Stats{}, err
+	}
+	skillBuffs, err := parseSkillBuffData(cabalData)
 	if err != nil {
 		return Stats{}, err
 	}
@@ -140,6 +164,10 @@ func Initialize(directory string) (Stats, error) {
 		return Stats{}, err
 	}
 	rankProgress, rankBonuses, err := parseSkillRankData(cabalData)
+	if err != nil {
+		return Stats{}, err
+	}
+	rankLimits, err := parseSkillRankLimitData(cabalData)
 	if err != nil {
 		return Stats{}, err
 	}
@@ -169,6 +197,7 @@ func Initialize(directory string) (Stats, error) {
 	skillLevels = levels
 	skillDamageData = damageData
 	skillMetaData = skillMetadata
+	skillBuffData = skillBuffs
 	itemSellData = sellData
 	itemTypes = parsedItemTypes
 	manaPotionData = parsedManaPotions
@@ -180,11 +209,16 @@ func Initialize(directory string) (Stats, error) {
 	characterLevels = levelsTable
 	skillRankProgressData = rankProgress
 	skillRankBonusData = rankBonuses
+	skillRankLimitData = rankLimits
 	battleModeSkillData = battleModeSkills
 	forceCoreRates = parsedForceCoreRates
 	forceCoreOptions = parsedForceCoreOptions
 	forceCoreChanges = parsedForceCoreChanges
 	shopItems = shops
+	questMissionCounts = parsedQuestMissionCounts
+	questNPCActions = parsedQuestNPCActions
+	questMissionItems = parsedQuestMissionItems
+	questRewards = parsedQuestRewards
 	stats.CharacterLevels = len(levelsTable)
 	stats.ShopItems = shopItemCount(shops)
 	warpPoints = parsedWarpPoints

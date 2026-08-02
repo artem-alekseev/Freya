@@ -63,8 +63,9 @@ func (e *Equipment) Set(slot uint16, item Item) (bool, error) {
 	e.mutex.Lock()
 	defer e.mutex.Unlock()
 
+	item.Slot = slot
 	ok, err := e.sync(rpc.EquipItem, &item, nil)
-	if err == nil {
+	if err == nil && ok {
 		e.Equip[int(slot)] = item
 	}
 
@@ -93,8 +94,9 @@ func (e *Equipment) Remove(slot uint16) (bool, error) {
 		return ok, errors.New("such item does not exist in the equipment")
 	}
 
+	item.Slot = slot
 	ok, err := e.sync(rpc.UnEquipItem, &item, nil)
-	if err == nil {
+	if err == nil && ok {
 		delete(e.Equip, int(slot))
 	}
 
@@ -251,14 +253,14 @@ func (e *Equipment) MoveItem(old, new uint16) (bool, error) {
 
 	newItem, ok := e.Equip[int(new)]
 	if ok {
-		return ok, errors.New("such item already exists in the equipment")
+		return false, errors.New("such item already exists in the equipment")
 	}
 
-	// set up new slot
-	newItem.Slot = new
+	oldItem.Slot = old
+	newItem = Item{Slot: new}
 
 	ok, err := e.sync(rpc.MoveEquipmentItem, &oldItem, &newItem)
-	if err == nil {
+	if err == nil && ok {
 		delete(e.Equip, int(old))
 
 		// swap slot
