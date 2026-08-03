@@ -4,6 +4,7 @@ import (
 	"github.com/ubis/Freya/cmd/gameserver/context"
 	"github.com/ubis/Freya/share/log"
 	"github.com/ubis/Freya/share/models/cashinventory"
+	"github.com/ubis/Freya/share/models/character"
 	"github.com/ubis/Freya/share/models/inventory"
 	"github.com/ubis/Freya/share/network"
 	"github.com/ubis/Freya/share/rpc"
@@ -27,6 +28,7 @@ type playerSetLevelFunc struct {
 type playerPositionFunc struct{}
 type playerDropItemFunc struct{}
 type playerAddCashItemFunc struct{}
+type playerSetPremiumFunc struct{}
 
 func (cmf sessionPacketFunc) Call(L *lua.LState) []lua.LValue {
 	ud := L.CheckUserData(1) // session
@@ -194,4 +196,51 @@ func (cmd playerAddCashItemFunc) Call(L *lua.LState) []lua.LValue {
 	}
 
 	return []lua.LValue{lua.LBool(true), lua.LNumber(len(response.Items))}
+}
+
+func (cmd playerSetPremiumFunc) Call(L *lua.LState) []lua.LValue {
+	ud := L.CheckUserData(1)
+	serviceKind := 1
+	if L.GetTop() >= 2 {
+		serviceKind = L.CheckInt(2)
+	}
+
+	session, ok := ud.Value.(*network.Session)
+	if !ok || serviceKind <= 0 || serviceKind > 35 {
+		return []lua.LValue{lua.LBool(false), lua.LNumber(0)}
+	}
+
+	ctx, err := context.Parse(session)
+	if err != nil {
+		log.Error(err.Error())
+		return []lua.LValue{lua.LBool(false), lua.LNumber(0)}
+	}
+
+	ctx.Mutex.RLock()
+	characterID := ctx.Char.Id
+	ctx.Mutex.RUnlock()
+
+	request := character.SetPremiumReq{
+		Server:      byte(g_ServerSettings.ServerId),
+		Character:   characterID,
+		ServiceKind: byte(serviceKind),
+	}
+	response := character.SetPremiumRes{}
+	if err := g_RPCHandler.Call(rpc.SetCharacterPremium, &request, &response); err != nil || !response.Result {
+		if err != nil {
+			log.Errorf("Unable to set monthly premium for character %d: %s", characterID, err)
+		}
+		return []lua.LValue{lua.LBool(false), lua.LNumber(0)}
+	}
+
+	ctx.Mutex.Lock()
+	if ctx.Char != nil && ctx.Char.Id == characterID {
+		ctx.Char.PremiumService = response.ServiceKind
+		ctx.Char.PremiumExpire = response.Expire
+	}
+	ctx.Mutex.Unlock()
+
+	sendChargeNotification(session)
+	sendDurationSvcData(session)
+	return []lua.LValue{lua.LBool(true), lua.LNumber(response.ServiceKind)}
 }

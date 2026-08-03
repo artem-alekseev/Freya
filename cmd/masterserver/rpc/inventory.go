@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 
+	"github.com/jmoiron/sqlx"
 	"github.com/ubis/Freya/share/models/inventory"
 	"github.com/ubis/Freya/share/rpc"
 )
@@ -528,6 +529,150 @@ func StorageMove(_ *rpc.Client, r *inventory.StorageMoveRequest, s *inventory.St
 	}
 
 	s.Result = true
+	return nil
+}
+
+// TradeItems atomically exchanges inventory items and Alz between two
+// characters. The gameserver validates the live trade state; the Master
+// validates the persisted rows again while holding both character locks.
+func TradeItems(_ *rpc.Client, r *inventory.TradeRequest, s *inventory.TradeResponse) error {
+	s.Result = false
+	if r == nil || r.FirstCharacter <= 0 || r.SecondCharacter <= 0 ||
+		r.FirstCharacter == r.SecondCharacter {
+		return errors.New("invalid trade request")
+	}
+
+	db := g_DatabaseManager.Get(r.Server)
+	if db == nil {
+		return errors.New("game database is not configured")
+	}
+
+	tx, err := db.Beginx()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var firstAlz, secondAlz uint64
+	if r.FirstCharacter < r.SecondCharacter {
+		if err = tx.Get(&firstAlz, "SELECT alz FROM characters WHERE id = ? FOR UPDATE", r.FirstCharacter); err != nil {
+			return err
+		}
+		if err = tx.Get(&secondAlz, "SELECT alz FROM characters WHERE id = ? FOR UPDATE", r.SecondCharacter); err != nil {
+			return err
+		}
+	} else {
+		if err = tx.Get(&secondAlz, "SELECT alz FROM characters WHERE id = ? FOR UPDATE", r.SecondCharacter); err != nil {
+			return err
+		}
+		if err = tx.Get(&firstAlz, "SELECT alz FROM characters WHERE id = ? FOR UPDATE", r.FirstCharacter); err != nil {
+			return err
+		}
+	}
+
+	if r.FirstAlz > firstAlz || r.SecondAlz > secondAlz {
+		return nil
+	}
+
+	if !validateTradeTransfers(tx, r.FirstCharacter, r.SecondCharacter, r.FirstItems) ||
+		!validateTradeTransfers(tx, r.SecondCharacter, r.FirstCharacter, r.SecondItems) {
+		return nil
+	}
+
+	newFirstAlz := firstAlz - r.FirstAlz
+	if ^uint64(0)-newFirstAlz < r.SecondAlz {
+		return nil
+	}
+	newFirstAlz += r.SecondAlz
+	newSecondAlz := secondAlz - r.SecondAlz
+	if ^uint64(0)-newSecondAlz < r.FirstAlz {
+		return nil
+	}
+	newSecondAlz += r.FirstAlz
+
+	if err = applyTradeTransfers(tx, r.FirstCharacter, r.SecondCharacter, r.FirstItems); err != nil {
+		return err
+	}
+	if err = applyTradeTransfers(tx, r.SecondCharacter, r.FirstCharacter, r.SecondItems); err != nil {
+		return err
+	}
+
+	if _, err = tx.Exec("UPDATE characters SET alz = ? WHERE id = ?", newFirstAlz, r.FirstCharacter); err != nil {
+		return err
+	}
+	if _, err = tx.Exec("UPDATE characters SET alz = ? WHERE id = ?", newSecondAlz, r.SecondCharacter); err != nil {
+		return err
+	}
+
+	if err = tx.Commit(); err != nil {
+		return err
+	}
+
+	s.Result = true
+	s.FirstAlz = newFirstAlz
+	s.SecondAlz = newSecondAlz
+	return nil
+}
+
+func validateTradeTransfers(tx *sqlx.Tx, sourceCharacter, targetCharacter int32, transfers []inventory.TradeItemTransfer) bool {
+	sourceSlots := make(map[uint16]struct{}, len(transfers))
+	targetSlots := make(map[uint16]struct{}, len(transfers))
+	for _, transfer := range transfers {
+		item := transfer.Item
+		if item.Kind == 0 || item.Slot == transfer.TargetSlot {
+			return false
+		}
+		if _, exists := sourceSlots[item.Slot]; exists {
+			return false
+		}
+		if _, exists := targetSlots[transfer.TargetSlot]; exists {
+			return false
+		}
+		sourceSlots[item.Slot] = struct{}{}
+		targetSlots[transfer.TargetSlot] = struct{}{}
+
+		var stored inventory.Item
+		if err := tx.Get(&stored,
+			"SELECT kind, serials, opt, slot, expire FROM characters_inventory "+
+				"WHERE id = ? AND slot = ? FOR UPDATE",
+			sourceCharacter, item.Slot); err != nil || stored != item {
+			return false
+		}
+
+		var occupied int
+		if err := tx.Get(&occupied,
+			"SELECT COUNT(*) FROM characters_inventory WHERE id = ? AND slot = ?",
+			targetCharacter, transfer.TargetSlot); err != nil || occupied != 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func applyTradeTransfers(tx *sqlx.Tx, sourceCharacter, targetCharacter int32, transfers []inventory.TradeItemTransfer) error {
+	for _, transfer := range transfers {
+		item := transfer.Item
+		result, err := tx.Exec(
+			"DELETE FROM characters_inventory WHERE id = ? AND slot = ? AND kind = ? AND serials = ? AND opt = ? AND expire = ?",
+			sourceCharacter, item.Slot, item.Kind, item.Serials, item.Option, item.Expire)
+		if err != nil {
+			return err
+		}
+		rows, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if rows != 1 {
+			return errors.New("trade source item disappeared during exchange")
+		}
+
+		item.Slot = transfer.TargetSlot
+		if _, err = tx.Exec(
+			"INSERT INTO characters_inventory (id, kind, serials, opt, slot, expire) VALUES (?, ?, ?, ?, ?, ?)",
+			targetCharacter, item.Kind, item.Serials, item.Option, item.Slot, item.Expire); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

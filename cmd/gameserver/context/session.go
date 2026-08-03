@@ -18,6 +18,10 @@ type Context struct {
 	Warehouse             inventory.Inventory
 	CashInventory         cashinventory.Inventory
 	PVP                   PVPState
+	Trade                 TradeState
+	Party                 PartyState
+	PartyInvite           PartyInviteState
+	PartySearch           PartySearchState
 	BattleMode            BattleModeState
 	BattleModeGeneration  uint64
 	BattleModeEndTimer    *time.Timer
@@ -40,6 +44,89 @@ type PVPState struct {
 	OpponentUserIdx     uint16
 	OpponentCharacterID int32
 }
+
+// PartyState stores the active party for the current game session. Party
+// membership is runtime state for now; PartySvr persistence can be added
+// later without changing the client packet layer.
+type PartyState struct {
+	ID                        int32
+	LeaderUserIdx             uint16
+	LeaderCharacterID         int32
+	LeaderOnlyInviteAuthority bool
+	NormalLootingType         byte
+	OwnerLootingType          byte
+	Members                   []PartyMember
+}
+
+type PartyMember struct {
+	UserIdx      uint16
+	CharacterID  int32
+	Level        uint16
+	Channel      byte
+	BattleStyle  byte
+	MemberStatus byte
+	Name         string
+}
+
+type PartyInviteState struct {
+	Status              byte
+	OpponentUserIdx     uint16
+	OpponentCharacterID int32
+	Channel             byte
+}
+
+// PartySearchState stores the temporary party-search advertisement for the
+// current character. It is intentionally runtime-only, like PartyState.
+type PartySearchState struct {
+	Registered     bool
+	MaxMemberCount byte
+	Title          string
+}
+
+const (
+	PartyInviteNone     byte = 0
+	PartyInviteOutgoing byte = 1
+	PartyInviteIncoming byte = 2
+)
+
+const (
+	PartyMemberStatusNone   byte = 0
+	PartyMemberStatusLogin  byte = 1
+	PartyMemberStatusLogoff byte = 2
+)
+
+const PartyMaxMembers = 7
+
+// TradeState stores the in-memory state of a trade request and exchange.
+type TradeState struct {
+	Status              byte
+	Role                byte
+	OpponentUserIdx     uint16
+	OpponentCharacterID int32
+	Items               []TradeItemOffer
+	Alz                 uint64
+	Submitted           bool
+	DestinationSlots    []uint16
+}
+
+// TradeItemOffer keeps the source inventory item together with the slot it
+// occupies in the trade window. The source slot remains part of Item.Slot.
+type TradeItemOffer struct {
+	Item      inventory.Item
+	TradeSlot uint16
+}
+
+const (
+	TradeStateNone    byte = 0
+	TradeStatePending byte = 1
+	TradeStateOpen    byte = 2
+)
+
+const (
+	TradeRoleNone      byte = 0
+	TradeRoleRequester byte = 1
+	TradeRoleTarget    byte = 2
+)
 
 // Init initializes a new context for the session.
 func Init(session *network.Session) {

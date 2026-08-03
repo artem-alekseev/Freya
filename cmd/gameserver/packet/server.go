@@ -40,24 +40,21 @@ func ServerEnv(session *network.Session, reader *network.Reader) {
 	packet.WriteInt64(0x0BA43B7400) // Limit Inventory Alz Save
 	packet.WriteInt64(0x0BA43B7400) // Limit Warehouse Alz Save
 	packet.WriteInt64(0x0BA43B7400) // Limit Trade Alz
-	packet.WriteByte(0x00)          // Allow Duplicated PCBang Premium
 	packet.WriteByte(0x00)          // Allow GuildBoard
+	packet.WriteByte(0x00)          // Allow Duplicated PCBang Premium
 	packet.WriteByte(0x00)          // PCBang Premium Prior Type
-	packet.WriteInt32(0x00)         // Use Trade Channel Restriction
+	packet.WriteInt32(0x00)         // Use Extension Move Packet
 	packet.WriteInt32(0x01)         // Use AgentShop
 	packet.WriteInt16(0x01)         // Use Lord BroadCast CoolTime Sec
 	packet.WriteByte(0x10)          // Dummy Limit
 	packet.WriteUint16(0x00)        // AgentShop Restriction Lv
 	packet.WriteUint16(0x00)        // PersonalShop Restriction Lv
-	packet.WriteByte(0x01)          // Use TPoint
 	packet.WriteByte(0x01)          // Use Guild Expansion
 	packet.WriteByte(0x00)          // Ignore Party Invite Distance
 	packet.WriteByte(0x01)          // Limited BroadCast By Lord
 	packet.WriteByte(0x00)          // Limit Normal Chat Lv
 	packet.WriteByte(0x00)          // Limit Trade Chat Lv
 	packet.WriteInt32(0x64)         // Max DP Limit
-	packet.WriteInt32(0x00)         // unk1
-	packet.WriteInt16(0x07)         // unk2
 
 	session.Send(packet)
 }

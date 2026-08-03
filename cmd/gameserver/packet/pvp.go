@@ -30,7 +30,7 @@ func PVPRequest(session *network.Session, reader *network.Reader) {
 		return
 	}
 
-	targetUserIndex := reader.ReadInt32()
+	targetUserIndex := decodeUserObjectIndex(reader.ReadInt32())
 	targetCharacterID := reader.ReadInt32()
 	pvpType := reader.ReadByte()
 	if pvpType != pvpTypePerson {
@@ -126,7 +126,7 @@ func PVPResponse(session *network.Session, reader *network.Reader) {
 		return
 	}
 
-	requesterUserIndex := reader.ReadInt32()
+	requesterUserIndex := decodeUserObjectIndex(reader.ReadInt32())
 	requesterCharacterID := reader.ReadInt32()
 	pvpType := reader.ReadByte()
 	requestResult := reader.ReadByte()
@@ -348,7 +348,7 @@ func PVPCancel(session *network.Session, reader *network.Reader) {
 		return
 	}
 
-	targetUserIndex := reader.ReadInt32()
+	targetUserIndex := decodeUserObjectIndex(reader.ReadInt32())
 	targetCharacterID := reader.ReadInt32()
 	pvpType := reader.ReadByte()
 	if pvpType != pvpTypePerson || targetUserIndex < 0 || targetUserIndex > int32(^uint16(0)) ||

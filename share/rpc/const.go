@@ -26,6 +26,7 @@ const (
 const (
 	LoadCharacters       = "LoadCharacters"
 	CreateCharacter      = "CreateCharacter"
+	SetCharacterPremium  = "SetCharacterPremium"
 	DeleteCharacter      = "DeleteCharacter"
 	SetSlotOrder         = "SetSlotOrder"
 	LoadCharacterData    = "LoadCharacterData"
@@ -57,6 +58,7 @@ const (
 	SwapItem          = "SwapItem"
 	MoveItem          = "MoveItem"
 	StorageMove       = "StorageMove"
+	TradeItems        = "TradeItems"
 	EnchantItem       = "EnchantItem"
 	ForceCoreEnchant  = "ForceCoreEnchant"
 	AttachItem        = "AttachItem"

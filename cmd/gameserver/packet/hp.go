@@ -68,14 +68,17 @@ func saveContextVitals(ctx *context.Context) bool {
 // whose value is stored in the union's integer field.
 func sendManaUpdate(session *network.Session, currentMP uint16) {
 	sendUpdatedData(session, updateTypeMP, uint64(currentMP))
+	notifyPartyMemberStats(session)
 }
 
 func sendManaPotionUpdate(session *network.Session, currentMP uint16) {
 	sendUpdatedData(session, updateTypeMPPotion, uint64(currentMP))
+	notifyPartyMemberStats(session)
 }
 
 func sendSpiritUpdate(session *network.Session, currentSP uint16) {
 	sendUpdatedData(session, updateTypeSP, uint64(currentSP))
+	notifyPartyMemberStats(session)
 }
 
 // sendBattleModeFailure follows WorldSvr's failure path. WorldSvr does not
@@ -113,4 +116,5 @@ func sendHealthUpdate(session *network.Session, currentHP uint16) {
 	pkt.WriteUint16(currentHP)
 	pkt.WriteUint32(0)
 	session.Send(pkt)
+	notifyPartyMemberStats(session)
 }

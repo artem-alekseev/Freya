@@ -60,6 +60,9 @@ func OnClientDisconnect(e *event.Event) {
 		return
 	}
 
+	gamepacket.CancelTrade(s)
+	gamepacket.LeaveParty(s)
+
 	// Save coordinates before removing the player from the world. The context
 	// keeps the last position even when the client disconnects unexpectedly.
 	gamepacket.SaveCharacterPosition(s)

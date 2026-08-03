@@ -29,6 +29,18 @@ type CreateRes struct {
 	Character
 }
 
+type SetPremiumReq struct {
+	Server      byte
+	Character   int32
+	ServiceKind byte
+}
+
+type SetPremiumRes struct {
+	Result      bool
+	ServiceKind byte
+	Expire      uint64
+}
+
 type DeleteReq struct {
 	Server byte
 	CharId int32
@@ -49,47 +61,56 @@ type SetOrderRes struct {
 }
 
 type Character struct {
-	Id           int32
-	Name         string
-	Level        uint16
-	World        byte
-	X            byte
-	Y            byte
-	Style        Style
-	LiveStyle    int32 `db:"-"`
-	Alz          uint64
-	Nation       byte   `db:"nation"`
-	SwordRank    byte   `db:"sword_rank"`
-	MagicRank    byte   `db:"magic_rank"`
-	SwordExp     uint16 `db:"sword_exp"`
-	MagicExp     uint16 `db:"magic_exp"`
-	SwordPoint   uint16 `db:"sword_point"`
-	MagicPoint   uint16 `db:"magic_point"`
-	SwordRankExp uint16 `db:"sword_rank_exp"`
-	MagicRankExp uint16 `db:"magic_rank_exp"`
-	CurrentHP    uint16 `db:"current_hp"`
-	MaxHP        uint16 `db:"max_hp"`
-	CurrentMP    uint16 `db:"current_mp"`
-	MaxMP        uint16 `db:"max_mp"`
-	CurrentSP    uint16 `db:"current_sp"`
-	MaxSP        uint16 `db:"max_sp"`
-	STR          uint32 `db:"str_stat"`
-	INT          uint32 `db:"int_stat"`
-	DEX          uint32 `db:"dex_stat"`
-	PNT          uint32 `db:"pnt_stat"`
-	Exp          uint64
-	WarExp       uint64 `db:"war_exp"`
-	Equipment    inventory.Equipment
-	Inventory    *inventory.Inventory
-	Skills       skills.SkillList
-	Links        *skills.Links
-	Created      time.Time
+	Id             int32
+	Name           string
+	Level          uint16
+	World          byte
+	X              byte
+	Y              byte
+	Style          Style
+	LiveStyle      int32 `db:"-"`
+	Alz            uint64
+	Nation         byte   `db:"nation"`
+	SwordRank      byte   `db:"sword_rank"`
+	MagicRank      byte   `db:"magic_rank"`
+	SwordExp       uint16 `db:"sword_exp"`
+	MagicExp       uint16 `db:"magic_exp"`
+	SwordPoint     uint16 `db:"sword_point"`
+	MagicPoint     uint16 `db:"magic_point"`
+	SwordRankExp   uint16 `db:"sword_rank_exp"`
+	MagicRankExp   uint16 `db:"magic_rank_exp"`
+	CurrentHP      uint16 `db:"current_hp"`
+	MaxHP          uint16 `db:"max_hp"`
+	CurrentMP      uint16 `db:"current_mp"`
+	MaxMP          uint16 `db:"max_mp"`
+	CurrentSP      uint16 `db:"current_sp"`
+	MaxSP          uint16 `db:"max_sp"`
+	STR            uint32 `db:"str_stat"`
+	INT            uint32 `db:"int_stat"`
+	DEX            uint32 `db:"dex_stat"`
+	PNT            uint32 `db:"pnt_stat"`
+	Exp            uint64
+	WarExp         uint64 `db:"war_exp"`
+	PremiumService byte   `db:"premium_service"`
+	PremiumExpire  uint64 `db:"premium_expire"`
+	Equipment      inventory.Equipment
+	Inventory      *inventory.Inventory
+	Skills         skills.SkillList
+	Links          *skills.Links
+	Created        time.Time
 
 	// movement data
 	BeginX int16 `db:"-"`
 	BeginY int16 `db:"-"`
 	EndX   int16 `db:"-"`
 	EndY   int16 `db:"-"`
+}
+
+// HasPremium reports whether the character has an active general premium
+// service. PremiumExpire is a Unix timestamp; zero means that the service is
+// not active.
+func (c Character) HasPremium(now uint64) bool {
+	return c.PremiumService != 0 && c.PremiumExpire > now
 }
 
 type DataReq struct {

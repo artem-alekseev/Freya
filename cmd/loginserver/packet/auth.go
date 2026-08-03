@@ -60,8 +60,11 @@ func AuthAccount(session *network.Session, reader *network.Reader) {
 	packet.WriteByte(r.Status)
 	packet.WriteInt32(r.Id)
 	packet.WriteInt16(0x00)
-	packet.WriteByte(len(r.CharList)) // server count
-	packet.WriteInt64(0x00)
+	// The client reads this position as the low byte of iResidentNum2,
+	// which contains account restriction flags. Writing the number of
+	// servers here made a single configured server look like TRADE_RESTRICT.
+	packet.WriteByte(0x00)
+	packet.WriteBytes(make([]byte, 7))
 	packet.WriteInt32(0x00) // premium service id
 	packet.WriteInt32(0x00) // premium service expire date
 	packet.WriteByte(0x00)

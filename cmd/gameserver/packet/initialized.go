@@ -78,6 +78,26 @@ func Initialized(session *network.Session, reader *network.Reader) {
 		return
 	}
 
+	// General premium is character-bound in Freya. Renew its one-month term
+	// during every character initialization, before the character data and
+	// ChargeInfo are sent to the client.
+	if c.PremiumService != 0 {
+		premiumReq := character.SetPremiumReq{
+			Server:      byte(g_ServerSettings.ServerId),
+			Character:   c.Id,
+			ServiceKind: c.PremiumService,
+		}
+		premiumRes := character.SetPremiumRes{}
+		if err := g_RPCHandler.Call(rpc.SetCharacterPremium, &premiumReq, &premiumRes); err != nil || !premiumRes.Result {
+			if err != nil {
+				log.Errorf("Unable to renew premium for character %d: %s", c.Id, err)
+			}
+		} else {
+			c.PremiumService = premiumRes.ServiceKind
+			c.PremiumExpire = premiumRes.Expire
+		}
+	}
+
 	hpChanged := c.RecalculateHP()
 	mpChanged := c.RecalculateMP()
 	spChanged := c.RecalculateSP()
@@ -268,6 +288,13 @@ func Initialized(session *network.Session, reader *network.Reader) {
 	worldManager := ctx.WorldManager
 	ctx.Mutex.Unlock()
 
+	// WorldSvr sends the active charge notification and the duration-service
+	// table during character initialization. The client uses both packets to
+	// decide whether premium-only features, such as the dummy, are available.
+	sendChargeNotification(session)
+	sendDurationSvcData(session)
+	sendPartyStatsReconnect(session)
+
 	if worldManager == nil {
 		log.Error("Unable to get world manager!")
 		return
@@ -336,6 +363,8 @@ func Uninitialze(session *network.Session, reader *network.Reader) {
 	if ctx, err := context.Parse(session); err == nil {
 		resetBattleMode(session, ctx)
 	}
+	CancelTrade(session)
+	LeaveParty(session)
 
 	SaveCharacterPosition(session)
 	// The character list is reused while the TCP session remains connected.
@@ -663,6 +692,9 @@ func fillPlayerInfo(pkt *network.Writer, session *network.Session) {
 	}
 	eq, eqlen := c.Equipment.SerializeEx()
 	pkt.WriteUint32(c.Id)
+	// USERLIST_DATA.iUserIdx is the full OT_USER object index. The client
+	// stores this value in CCharacterEntity::m_iIndex and sends it unchanged
+	// in trade, party and PvP requests; the high byte must not be stripped.
 	pkt.WriteUint32(userObjectIndex(session))
 	pkt.WriteUint32(c.Level)
 	pkt.WriteInt32(0x01C2)    // might be dwMoveBgnTime
@@ -675,23 +707,23 @@ func fillPlayerInfo(pkt *network.Writer, session *network.Session) {
 	pkt.WriteInt32(0) // reserved
 	pkt.WriteInt32(c.Style.Get())
 	pkt.WriteByte(c.LiveStyle) // animation id aka "live style"
-	pkt.WriteInt16(0)
-	pkt.WriteInt16(eqlen)
-	pkt.WriteByte(0) // trade
-	pkt.WriteByte(0)
-	pkt.WriteInt32(0x01) // title
-	pkt.WriteByte(0x0)
-	pkt.WriteByte(0x0)
-	pkt.WriteByte(0x0)
-	pkt.WriteByte(0x0)
-	pkt.WriteInt16(0)
-	pkt.WriteByte(c.Nation)
-	pkt.WriteInt16(0)
-	pkt.WriteInt16(0)
+	pkt.WriteByte(0)           // style extension
+	pkt.WriteByte(0)           // dead state
+	pkt.WriteByte(byte(eqlen)) // equipment count
+	pkt.WriteByte(0)           // GM flag
+	pkt.WriteByte(0)           // personal shop mode
+	pkt.WriteByte(0)           // avatar count
+	pkt.WriteUint16(0)         // invalid/unequipped title (WORD in the target client)
+	pkt.WriteInt32(0)          // guild number
+	pkt.WriteInt32(0)          // guild color
+	pkt.WriteByte(0)           // style effects
+	pkt.WriteByte(0)           // buff count
+	pkt.WriteByte(0)           // debuff count
+	pkt.WriteByte(0)           // GM buff count
+	pkt.WriteByte(0)           // lord type
 	pkt.WriteByte(len(c.Name) + 1)
 	pkt.WriteString(c.Name)
-	pkt.WriteByte(1) // guild name len
-	pkt.WriteString("1")
+	pkt.WriteByte(0) // guild name length; character name uses Pascal length above
 	pkt.WriteBytes(eq)
 }
 

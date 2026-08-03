@@ -5,6 +5,7 @@ addCommandHandler('help', function(session)
     sendClientMessage(session, ' #setlevel <new_level> - set new level')
     sendClientMessage(session, ' #drop <kind> <opt> - drop an item')
     sendClientMessage(session, ' #cash <kind> <opt> <count> - add items to cash shop')
+    sendClientMessage(session, ' #premium [service_kind] - enable monthly general premium')
 end)
 
 addCommandHandler('reload', function(session)
@@ -114,4 +115,20 @@ addCommandHandler('cash', function(session, kind, opt, count)
     end
 
     sendClientMessage(session, 'Cash shop items added: '..amount)
+end)
+
+addCommandHandler('premium', function(session, service)
+    local service_id = tonumber(service) or 1
+    if service_id < 1 or service_id > 35 or service_id % 1 ~= 0 then
+        sendClientMessage(session, 'Invalid command usage: #premium [service_kind]')
+        return
+    end
+
+    local enabled, kind = setPlayerPremium(session, service_id)
+    if not enabled then
+        sendClientMessage(session, 'Unable to enable monthly premium')
+        return
+    end
+
+    sendClientMessage(session, 'Monthly general premium enabled (service '..kind..')')
 end)

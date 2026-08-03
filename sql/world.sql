@@ -65,6 +65,8 @@ CREATE TABLE `characters` (
   `pnt_stat` int(10) UNSIGNED NOT NULL DEFAULT '0',
   `exp` bigint(20) UNSIGNED NOT NULL DEFAULT '0',
   `war_exp` bigint(20) UNSIGNED NOT NULL DEFAULT '0',
+  `premium_service` tinyint(3) UNSIGNED NOT NULL DEFAULT '0',
+  `premium_expire` bigint(20) UNSIGNED NOT NULL DEFAULT '0',
   `created` datetime NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=latin1 ROW_FORMAT=COMPACT;
 

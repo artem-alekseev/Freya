@@ -27,7 +27,7 @@ func AttckToUser(session *network.Session, reader *network.Reader) {
 		return
 	}
 
-	targetUserIndex := reader.ReadInt32()
+	targetUserIndex := decodeUserObjectIndex(reader.ReadInt32())
 	targetCharacterID := reader.ReadInt32()
 	if targetUserIndex < 0 || targetUserIndex > int32(^uint16(0)) ||
 		targetUserIndex == int32(session.UserIdx) || targetCharacterID <= 0 {
@@ -145,7 +145,7 @@ func handleTargetedUserSkill(session *network.Session, reader *network.Reader) {
 	targets := make([]pvpUserSkillTarget, targetNum)
 	for i := range targets {
 		targets[i] = pvpUserSkillTarget{
-			userIndex: reader.ReadInt32(),
+			userIndex: decodeUserObjectIndex(reader.ReadInt32()),
 			hitNum:    reader.ReadByte(),
 		}
 	}

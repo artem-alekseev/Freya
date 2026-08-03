@@ -15,6 +15,10 @@ import (
 
 const newTargetUserPacketSize = 14 // header + int32 user index
 
+func decodeUserObjectIndex(raw int32) int32 {
+	return int32(uint32(raw) & 0x0000FFFF)
+}
+
 // NewTargetUser Packet
 func NewTargetUser(session *network.Session, reader *network.Reader) {
 	if reader.Size < newTargetUserPacketSize {
@@ -23,11 +27,13 @@ func NewTargetUser(session *network.Session, reader *network.Reader) {
 		return
 	}
 
-	targetUserIndex := reader.ReadInt32()
-	if targetUserIndex < 0 || targetUserIndex > int32(^uint16(0)) {
-		log.Warningf("[NEWTARGETUSER] invalid user index: %d", targetUserIndex)
-		sendNewTargetUserResult(session, 0x01, 0, 0)
-		return
+	rawTargetUserIndex := reader.ReadInt32()
+	// WorldSvr normally sends the raw USERLIST_DATA.iUserIdx. Accept a
+	// typed object index as well, because some client paths use that form.
+	// Both are normalized to the low 16-bit session index for lookup.
+	targetUserIndex := decodeUserObjectIndex(rawTargetUserIndex)
+	if rawTargetUserIndex != targetUserIndex {
+		log.Debugf("[NEWTARGETUSER] decoded object index: raw=%d user=%d", rawTargetUserIndex, targetUserIndex)
 	}
 
 	pSession := g_NetworkManager.GetSession(uint16(targetUserIndex))
@@ -65,8 +71,9 @@ func sendNewTargetUserResult(session *network.Session, result byte, currentHP, m
 }
 
 func EndTargetUser(session *network.Session, reader *network.Reader) {
-	sessionId := reader.ReadUint16()
-	pSession := g_NetworkManager.GetSession(sessionId)
+	rawTargetUserIndex := reader.ReadInt32()
+	targetUserIndex := decodeUserObjectIndex(rawTargetUserIndex)
+	pSession := g_NetworkManager.GetSession(uint16(targetUserIndex))
 	ctx, err := context.Parse(pSession)
 	if err != nil {
 		log.Error(err.Error())

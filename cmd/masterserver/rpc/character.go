@@ -29,7 +29,7 @@ func LoadCharacters(_ *rpc.Client, r *character.ListReq, s *character.ListRes) e
 			"id, name, level, world, x, y, alz, nation, sword_rank, magic_rank, "+
 			"sword_exp, magic_exp, sword_point, magic_point, sword_rank_exp, magic_rank_exp, "+
 			"current_hp, max_hp, current_mp, max_mp, current_sp, max_sp, str_stat, "+
-			"int_stat, dex_stat, pnt_stat, exp, war_exp, created "+
+			"int_stat, dex_stat, pnt_stat, exp, war_exp, premium_service, premium_expire, created "+
 			"FROM characters "+
 			"WHERE id >= ? AND id <= ?", r.Account*8, r.Account*8+5)
 
@@ -72,6 +72,40 @@ func LoadCharacters(_ *rpc.Client, r *character.ListReq, s *character.ListRes) e
 	db.Get(&res.LastId, "SELECT last_char FROM lobby_metadata WHERE id = ?", r.Account)
 
 	*s = res
+	return nil
+}
+
+// SetCharacterPremium enables or renews a general premium service for one
+// calendar month. The operation is also used when a character is initialized,
+// so every login renews the stored expiration date.
+func SetCharacterPremium(_ *rpc.Client, r *character.SetPremiumReq, s *character.SetPremiumRes) error {
+	s.Result = false
+	s.Expire = 0
+	if r == nil || r.Character <= 0 || r.ServiceKind == 0 || r.ServiceKind > 35 {
+		return errors.New("invalid premium service update")
+	}
+
+	db := g_DatabaseManager.Get(r.Server)
+	if db == nil {
+		return errors.New("game database is not configured")
+	}
+
+	var id int32
+	if err := db.Get(&id, "SELECT id FROM characters WHERE id = ?", r.Character); err != nil {
+		return err
+	}
+
+	expire := uint64(time.Now().AddDate(0, 1, 0).Unix())
+	if _, err := db.Exec(
+		"UPDATE characters SET premium_service = ?, premium_expire = ? WHERE id = ?",
+		r.ServiceKind, expire, r.Character,
+	); err != nil {
+		return err
+	}
+
+	s.Result = true
+	s.ServiceKind = r.ServiceKind
+	s.Expire = expire
 	return nil
 }
 

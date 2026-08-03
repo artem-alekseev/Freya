@@ -26,6 +26,31 @@ type StorageMoveResponse struct {
 	Result bool
 }
 
+// TradeItemTransfer describes one item moving from a source character to a
+// destination inventory slot during an atomic trade transaction.
+type TradeItemTransfer struct {
+	Item       Item
+	TargetSlot uint16
+}
+
+// TradeRequest transfers both sides' items and Alz in one database
+// transaction. Items from First are received by Second and vice versa.
+type TradeRequest struct {
+	Server          byte
+	FirstCharacter  int32
+	SecondCharacter int32
+	FirstItems      []TradeItemTransfer
+	SecondItems     []TradeItemTransfer
+	FirstAlz        uint64
+	SecondAlz       uint64
+}
+
+type TradeResponse struct {
+	Result    bool
+	FirstAlz  uint64
+	SecondAlz uint64
+}
+
 // EnchantRequest updates one inventory item and consumes the supplied core
 // items as one transaction in the World database.
 type EnchantRequest struct {

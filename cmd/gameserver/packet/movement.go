@@ -93,6 +93,7 @@ func MoveEnded(session *network.Session, reader *network.Reader) {
 	ctx.Mutex.Unlock()
 
 	world.BroadcastSessionPacket(session, pkt)
+	notifyPartyMemberStats(session)
 }
 
 // MoveChanged Packet
@@ -166,6 +167,7 @@ func MoveTilePos(session *network.Session, reader *network.Reader) {
 	ctx.Mutex.Unlock()
 
 	world.AdjustCell(session)
+	notifyPartyMemberStats(session)
 }
 
 // ChangeDirection Packet
@@ -263,6 +265,7 @@ func KeyMoveEnded(session *network.Session, reader *network.Reader) {
 			ctx.Char.Y = byte(pntY)
 			ctx.Mutex.Unlock()
 			world.AdjustCell(session)
+			notifyPartyMemberStats(session)
 		}
 	}
 
