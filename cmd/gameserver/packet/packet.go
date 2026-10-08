@@ -89,6 +89,7 @@ func RegisterPackets() {
 	pk.Register(NFY_SKILLTOUSER, "NotifySkillToUser", nil)
 	pk.Register(NFY_ATTCKTOMOBS, "NotifyAttckToMobs", nil)
 	pk.Register(SYSTEMMESSG, "SystemMessg", nil)
+	pk.Register(REQ_DISCONNECTS, "RequestDisconnects", RequestDisconnects)
 	pk.Register(WARPCOMMAND, "WarpCommand", WarpCommand)
 	pk.Register(USESTATBONS, "UseStatBons", UseStatBons)
 	pk.Register(USERSTAT_AUTODISTRIBUTION, "UserStatAutoDistribution", UserStatAutoDistribution)
@@ -163,6 +164,16 @@ func RegisterPackets() {
 	pk.Register(NFY_RANKLIMITHOOK, "NotifyRankLimitHook", nil)
 	pk.Register(UPDATE_HELPINFO, "UpdateHelpInfo", UpdateHelpInfo)
 	pk.Register(DURATIONSVC_DATA, "DurationSvcData", DurationSvcData)
+	pk.Register(MAIL_GET_RECEIVED_DETAIL, "MailGetReceivedDetail", MailGetReceivedDetail)
+	pk.Register(MAIL_READ_RECEIVED, "MailReadReceived", MailReadReceived)
+	pk.Register(MAIL_GET_SENT_DETAIL, "MailGetSentDetail", MailGetSentDetail)
+	pk.Register(MAIL_RECEIVE_ALZ, "MailReceiveAlz", MailReceiveAlz)
+	pk.Register(MAIL_RECEIVE_ITEM, "MailReceiveItem", MailReceiveItem)
+	pk.Register(MAIL_SEND, "MailSend", MailSend)
+	pk.Register(MAIL_RETURN, "MailReturn", MailReturn)
+	pk.Register(MAIL_DELETE_RECEIVED, "MailDeleteReceived", MailDeleteReceived)
+	pk.Register(MAIL_DELETE_SENT, "MailDeleteSent", MailDeleteSent)
+	pk.Register(MAIL_REPORT, "MailReport", MailReport)
 }
 
 func RegisterFunc() {

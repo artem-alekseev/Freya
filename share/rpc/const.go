@@ -77,3 +77,32 @@ const (
 	QuickLinkRemove       = "QuickLinkRemove"
 	QuickLinkSwap         = "QuickLinkSwap"
 )
+
+// Mail related RPC's
+const (
+	LoadMailLists      = "LoadMailLists"
+	LoadMailDetail     = "LoadMailDetail"
+	MarkMailRead       = "MarkMailRead"
+	SendMail           = "SendMail"
+	ReceiveMailAlz     = "ReceiveMailAlz"
+	ReceiveMailItem    = "ReceiveMailItem"
+	ReturnMail         = "ReturnMail"
+	DeleteReceivedMail = "DeleteReceivedMail"
+	DeleteSentMail     = "DeleteSentMail"
+	ReportMail         = "ReportMail"
+	NotifyMailReceived = "NotifyMailReceived"
+)
+
+// Buddy related RPC's
+const (
+	LookupBuddyCharacter = "LookupBuddyCharacter"
+	LoadBuddyList        = "LoadBuddyList"
+	AddBuddy             = "AddBuddy"
+	UpdateBuddyMemo      = "UpdateBuddyMemo"
+	DeleteBuddy          = "DeleteBuddy"
+)
+
+// Guild related RPC's
+const (
+	CreateGuild = "CreateGuild"
+)

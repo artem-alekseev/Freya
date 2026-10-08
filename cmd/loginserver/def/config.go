@@ -48,7 +48,7 @@ func (c *Config) Read() {
 	c.Sns_URL = conf.GetString("client", "sns_url", "")
 
 	c.MasterIp = conf.GetString("master", "ip", "1270.0.1")
-	c.MasterPort = conf.GetInt("master", "port", 9001)
+	c.MasterPort = conf.GetInt("master", "port", 9002)
 
 	c.ScriptDirectory = conf.GetString("script", "directory", "")
 }

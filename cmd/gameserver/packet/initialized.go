@@ -1,6 +1,8 @@
 package packet
 
 import (
+	"encoding/binary"
+	"net"
 	"strings"
 
 	"github.com/ubis/Freya/cmd/gameserver/clientdata"
@@ -173,26 +175,26 @@ func Initialized(session *network.Session, reader *network.Reader) {
 	pkt.WriteUint16(4)
 	//pkt.WriteInt32(0x2A30)
 	pkt.WriteInt32(13107) // honour pnt +
-	pkt.WriteUint16(0x00)
-	pkt.WriteInt32(0x00)
-	pkt.WriteInt32(0x00)
-	pkt.WriteInt32(0x00)
-	pkt.WriteInt32(0x00)
-	pkt.WriteInt32(0x00)
-	pkt.WriteInt32(0x00)
-	pkt.WriteInt32(0x00)
-	pkt.WriteInt32(0x00)
-	pkt.WriteByte(1)
-	pkt.WriteByte(1)
-	pkt.WriteByte(1)
-	pkt.WriteByte(1)
+	pkt.WriteUint64(0)    // penalty experience
+	pkt.WriteUint64(0)    // HP penalty
+	pkt.WriteUint64(0)    // MP penalty
+	pkt.WriteUint16(0)    // PK penalty time
+
+	chatIP := net.ParseIP(g_ServerConfig.PublicIp).To4()
+	if chatIP == nil {
+		chatIP = net.ParseIP("127.0.0.1").To4()
+	}
+	pkt.WriteUint32(binary.LittleEndian.Uint32(chatIP)) // chat ip
+	pkt.WriteUint16(uint16(g_ServerConfig.ChatPort))    // chat port
+
+	// AgentShop is not implemented, but its fields must remain in the packet.
+	pkt.WriteUint32(0)
+	pkt.WriteUint16(0)
+
 	pkt.WriteByte(c.Nation) // Nation
 	pkt.WriteInt32(0x00)
 	pkt.WriteInt32(0xFFFF) // warp code
 	pkt.WriteInt32(0xFFFF) // map code
-
-	//pkt.WriteUint32(0x8501A8C0) // chat ip
-	//pkt.WriteUint16(0x9858)     // chat port
 
 	//pkt.WriteUint32(0x8501A8C0) // ah ip
 	//pkt.WriteUint16(0x9859)     // ah port
@@ -714,7 +716,7 @@ func fillPlayerInfo(pkt *network.Writer, session *network.Session) {
 	pkt.WriteByte(0)           // personal shop mode
 	pkt.WriteByte(0)           // avatar count
 	pkt.WriteUint16(0)         // invalid/unequipped title (WORD in the target client)
-	pkt.WriteInt32(0)          // guild number
+	pkt.WriteUint32(c.GuildNo) // guild number
 	pkt.WriteInt32(0)          // guild color
 	pkt.WriteByte(0)           // style effects
 	pkt.WriteByte(0)           // buff count

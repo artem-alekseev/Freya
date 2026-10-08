@@ -85,6 +85,7 @@ const (
 	NFY_ATTCKTOUSER           = 226
 	NFY_ATTCKMOTION           = 227
 	SYSTEMMESSG               = 241
+	REQ_DISCONNECTS           = 242
 	WARPCOMMAND               = 244
 	USESTATBONS               = 250
 	USERSTAT_AUTODISTRIBUTION = 255
@@ -133,6 +134,16 @@ const (
 	BACK_TO_CHAR_LOBBY        = 985
 	NFY_DELLINKMOBS           = 998
 	DURATIONSVC_DATA          = 999
+	MAIL_GET_RECEIVED_DETAIL  = 2117
+	MAIL_READ_RECEIVED        = 2118
+	MAIL_GET_SENT_DETAIL      = 2119
+	MAIL_RECEIVE_ALZ          = 2120
+	MAIL_RECEIVE_ITEM         = 2122
+	MAIL_SEND                 = 2124
+	MAIL_RETURN               = 2126
+	MAIL_DELETE_RECEIVED      = 2128
+	MAIL_DELETE_SENT          = 2129
+	MAIL_REPORT               = 2130
 	SUBPW_SET                 = 1030
 	SUBPW_CHECK_REQ           = 1032
 	SUBPW_CHECK               = 1034

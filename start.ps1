@@ -546,6 +546,7 @@ $binPath = Join-Path $rootPath 'bin'
 
 $masterAppLog = Join-Path $rootPath 'log\masterserver.log'
 $loginAppLog = Join-Path $rootPath 'log\loginserver.log'
+$chatAppLog = Join-Path $rootPath 'log\chatserver.log'
 
 $gameAppLog = Join-Path $rootPath (
     'log\gameserver_{0}_{1}.log' -f `
@@ -558,7 +559,7 @@ $services = @(
         Name             = 'Master'
         ProcessName      = 'masterserver'
         Path             = Join-Path $binPath 'masterserver.exe'
-        Port             = 9001
+        Port             = 9002
         Arguments        = @()
         WorkingDirectory = Join-Path $rootPath 'cmd\masterserver'
     },
@@ -570,6 +571,15 @@ $services = @(
         Port             = 38101
         Arguments        = @()
         WorkingDirectory = Join-Path $rootPath 'cmd\loginserver'
+    },
+
+    [pscustomobject]@{
+        Name             = 'Chat'
+        ProcessName      = 'chatserver'
+        Path             = Join-Path $binPath 'chatserver.exe'
+        Port             = 38112
+        Arguments        = @()
+        WorkingDirectory = Join-Path $rootPath 'cmd\chatserver'
     },
 
     [pscustomobject]@{
@@ -599,6 +609,12 @@ $logs = @(
     },
 
     [pscustomobject]@{
+        Name  = 'CHAT'
+        Path  = $chatAppLog
+        Color = [ConsoleColor]::DarkCyan
+    },
+
+    [pscustomobject]@{
         Name  = 'GAME'
         Path  = $gameAppLog
         Color = [ConsoleColor]::Magenta
@@ -623,7 +639,7 @@ foreach ($service in $services) {
 Assert-PortOwnership $services
 
 # Останавливаем старые серверы:
-# Game → Login → Master
+# Game → Chat → Login → Master
 for ($index = $services.Count - 1; $index -ge 0; $index--) {
     Stop-ExpectedService $services[$index]
 }
@@ -655,6 +671,11 @@ $buildTargets = @(
 
     @{
         Output  = $services[2].Path
+        Package = './cmd/chatserver'
+    },
+
+    @{
+        Output  = $services[3].Path
         Package = './cmd/gameserver'
     }
 )

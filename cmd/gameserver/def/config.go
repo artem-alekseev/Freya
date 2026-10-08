@@ -9,6 +9,7 @@ import (
 type Config struct {
 	PublicIp   string
 	Port       int
+	ChatPort   int
 	MaxUsers   int
 	UseLocalIp bool
 
@@ -37,6 +38,7 @@ func (c *Config) Read() {
 	// read values from configuration...
 	c.PublicIp = conf.GetString("network", "ip", "127.0.0.1")
 	c.Port = conf.GetInt("network", "port", 38111)
+	c.ChatPort = conf.GetInt("network", "chat_port", 38112)
 	c.MaxUsers = conf.GetInt("network", "max_users", 100)
 	c.UseLocalIp = conf.GetBool("network", "use_local_ip", false)
 
@@ -45,7 +47,7 @@ func (c *Config) Read() {
 	c.SpawnMobs = conf.GetBool("server", "spawn_mobs", true)
 
 	c.MasterIp = conf.GetString("master", "ip", "127.0.0.1")
-	c.MasterPort = conf.GetInt("master", "port", 9001)
+	c.MasterPort = conf.GetInt("master", "port", 9002)
 
 	c.ScriptDirectory = conf.GetString("script", "directory", "")
 }

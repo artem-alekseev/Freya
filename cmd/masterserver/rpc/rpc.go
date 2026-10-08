@@ -75,4 +75,23 @@ func RegisterPackets() {
 	g_RPCHandler.Register(rpc.QuickLinkSet, QuickLinkSet)
 	g_RPCHandler.Register(rpc.QuickLinkRemove, QuickLinkRemove)
 	g_RPCHandler.Register(rpc.QuickLinkSwap, QuickLinkSwap)
+
+	g_RPCHandler.Register(rpc.LoadMailLists, LoadMailLists)
+	g_RPCHandler.Register(rpc.LoadMailDetail, LoadMailDetail)
+	g_RPCHandler.Register(rpc.MarkMailRead, MarkMailRead)
+	g_RPCHandler.Register(rpc.SendMail, SendMail)
+	g_RPCHandler.Register(rpc.ReceiveMailAlz, ReceiveMailAlz)
+	g_RPCHandler.Register(rpc.ReceiveMailItem, ReceiveMailItem)
+	g_RPCHandler.Register(rpc.ReturnMail, ReturnMail)
+	g_RPCHandler.Register(rpc.DeleteReceivedMail, DeleteReceivedMail)
+	g_RPCHandler.Register(rpc.DeleteSentMail, DeleteSentMail)
+	g_RPCHandler.Register(rpc.ReportMail, ReportMail)
+
+	g_RPCHandler.Register(rpc.LookupBuddyCharacter, LookupCharacter)
+	g_RPCHandler.Register(rpc.LoadBuddyList, LoadBuddyList)
+	g_RPCHandler.Register(rpc.AddBuddy, AddBuddy)
+	g_RPCHandler.Register(rpc.UpdateBuddyMemo, UpdateBuddyMemo)
+	g_RPCHandler.Register(rpc.DeleteBuddy, DeleteBuddy)
+
+	g_RPCHandler.Register(rpc.CreateGuild, CreateGuild)
 }

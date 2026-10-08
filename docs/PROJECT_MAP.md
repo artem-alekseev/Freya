@@ -13,6 +13,7 @@ flowchart LR
     C["Cabal client"]
     LS["loginserver<br/>TCP :38101"]
     GS["gameserver 1..N<br/>TCP :38111+"]
+    CHAT["chatserver / ChatNode<br/>TCP :38112+"]
     MS["masterserver<br/>RPC TCP :9001"]
     LDB[("MariaDB: login")]
     WDB[("MariaDB: world 1..N")]
@@ -22,6 +23,8 @@ flowchart LR
 
     C -->|"версия, авторизация,<br/>список каналов"| LS
     C -->|"персонаж, мир,<br/>игровые пакеты"| GS
+    C -->|"чат, друзья,<br/>почта"| CHAT
+    GS -.->|"передаёт адрес ChatNode"| CHAT
     LS <-->|"двунаправленный gob RPC"| MS
     GS <-->|"двунаправленный gob RPC"| MS
     MS --> LDB
@@ -39,7 +42,8 @@ flowchart LR
 |---|---|---|
 | `masterserver` | Реестр Login/Game серверов, авторизация, доступ к Login/World DB, сохранение персонажей, вещей, навыков и quick links | `cmd/masterserver/main.go` |
 | `loginserver` | Клиентский handshake, проверка версии, логин, список серверов/каналов, URL сервисов | `cmd/loginserver/main.go` |
-| `gameserver` | Лобби персонажей, вход в мир, движение, бой, мобы, предметы, инвентарь, навыки, Lua-команды | `cmd/gameserver/main.go` |
+| `gameserver` | Лобби персонажей, вход в мир, движение, бой, мобы, предметы, инвентарь, навыки и Lua-команды | `cmd/gameserver/main.go` |
+| `chatserver` | Отдельный ChatNode для NEWCHAT: чат, друзья и почтовый протокол | `cmd/chatserver/main.go` |
 
 `loginserver` и `gameserver` являются RPC-клиентами Master, но transport
 двунаправленный: Master также вызывает зарегистрированные на них
@@ -85,7 +89,9 @@ flowchart LR
 6. При подключении к Master загружает дроплист мобов из World DB через
    `LoadMobDropList` и держит его в `WorldManager`.
 7. Подключается к Master и регистрирует канал.
-8. Слушает клиентский TCP на настроенном порту.
+8. Передаёт клиенту адрес/порт отдельного ChatNode и слушает основной игровой
+   TCP на настроенном порту.
+9. `chatserver` читает `cfg/chatserver.ini` и слушает NEWCHAT на `38112`.
 
 Важно: поиск `cfg/`, `data/`, `enc/` и `script/` зависит от
 `share/directory.Root()`, который удаляет первое вхождение `bin` из каталога
@@ -211,6 +217,41 @@ TCP read
   -> TCP write
 ```
 
+### ChatNode и почта
+
+После `INITIALIZED` клиент открывает отдельный NEWCHAT-сокет. `chatserver`
+выполняет handshake, подтверждает авторизацию персонажа и отвечает
+на `CSC_MAIL_GET_RECEIVED_LIST` (`2005`), `CSC_MAIL_GET_SENT_LIST` (`2006`) и
+`CSC_MAIL_UPDATE_RECEIVED_LIST` (`2007`). Для уже подключённого получателя
+ChatServer дополнительно отправляет `NFY_MAIL_NEW_RECEIVED` (`2008`), после
+чего клиент запрашивает новые записи через `2007`. Списки и письма загружаются
+из `characters_mail` через Master RPC. Основные игровые операции `2117`–`2130`
+обрабатываются GameServer: чтение, детали, отправка, возврат, удаление и
+получение Alz/предметов выполняются с атомарным изменением World DB.
+Вложения отправляются из обычного инвентаря целиком; при получении предмет
+проверяется свободный слот и запись добавляется в инвентарь только после
+успешной транзакции. Для существующих БД таблицу можно создать миграцией
+[`sql/character_mail.sql`](../sql/character_mail.sql).
+
+ChatNode также поддерживает базовый протокол друзей: `CSC_BUDDYGETGROUPLIST`
+(`461`) возвращает стандартную группу, `CSC_BUDDYGETMEMBERLIST` (`462`)
+загружает список, `CSC_BUDDYGETBLACKLIST` (`463`) возвращает пустой список
+чёрного списка, а `CSC_BUDDYMEMBERADD` (`474`) создаёт приглашение.
+Пакет `CSC_CHARGAMESTATECHANGE` (`410`) обновляет presence и возвращается
+клиенту с корректным идентификатором ChatNode, а `CSC_CHATNOTIFYUSERCONNECT`
+(`407`) уведомляет уже открытые списки друзей о входе или выходе персонажа.
+Приглашённый персонаж отвечает через `CSC_BUDDYMEMBERADDRESPONSE` (`478`);
+после принятия Master атомарно сохраняет две направленные записи в
+`characters_buddies` и ChatNode обновляет обоих клиентов пакетами `474` и
+`478`. Изменение личной заметки друга через `CSC_BUDDYMEMBERMEMOMODIFY`
+(`470`) сохраняется только в записи владельца списка. Для существующей базы используется миграция
+[`sql/character_buddies.sql`](../sql/character_buddies.sql).
+Удаление друга через `CSC_BUDDYMEMBERDEL` (`471`) удаляет обе направленные
+записи транзакционно и уведомляет второго персонажа пакетом `472`.
+Просмотр экипировки маршрутизируется ChatNode пакетами `2001`–`2004`:
+запрос передаётся целевому персонажу, а ответ с `EQUIPMENT_DATA2` возвращается
+инициатору.
+
 ### Покупка и использование книги навыка
 
 1. Game сопоставляет NPC, набор и индекс навыка с каталогом из
@@ -238,6 +279,7 @@ DEC-файлы являются runtime-входом и намеренно ис�
 | Инвентарь, CashInventory, склад, экипировка, навыки, quick links, активные квесты | Game-модели + Master RPC | World DB |
 | Тип и срок общего премиума | Game `Character` + Master RPC | `characters.premium_service`, `characters.premium_expire` |
 | Группа и приглашения | Game `context.Context` | Только runtime, без DB |
+| Друзья и приглашения | Chat `chatserver` + Master RPC | `characters_buddies` |
 | Каталог книг навыков и цены | Game `clientdata` | `enc/cabal.dec`, `enc/item.dec` |
 | Миры, клетки, мобы, предметы на земле | Game `WorldManager` | YAML/runtime и `mob_drop_list` через Master |
 | Конфигурация поведения | Каждый процесс | INI/YAML/Lua |
@@ -316,12 +358,13 @@ go test ./...
 go build -buildvcs=false -o bin/masterserver.exe ./cmd/masterserver
 go build -buildvcs=false -o bin/loginserver.exe ./cmd/loginserver
 go build -buildvcs=false -o bin/gameserver.exe ./cmd/gameserver
+go build -buildvcs=false -o bin/chatserver.exe ./cmd/chatserver
 ```
 
 Makefile предназначен прежде всего для Unix-подобного shell: он использует
 `pwd`, `mkdir -p`, `rm -r` и inline `GOOS=...`.
 
-Порядок запуска: MariaDB → Master → Login → один или несколько Game. Без
+Порядок запуска: MariaDB → Master → Login → ChatServer → один или несколько Game. Без
 Master Login/Game продолжают пытаться переподключиться, но RPC-зависимые
 операции работать не будут.
 

@@ -20,6 +20,10 @@ func ServerRegister(c *rpc.Client, r *server.RegisterReq, s *server.RegisterRes)
 		g_ServerManager.NewServer(server.Server{r, c})
 		log.Infof("Server type: GameServer (type: %d, server: %d, channel: %d, src: %s)",
 			r.ServerType, r.ServerId, r.ChannelId, c.GetEndPnt())
+	case server.CHAT_SERVER:
+		response.Registered = true
+		g_ServerManager.NewServer(server.Server{r, c})
+		log.Infof("Server type: ChatServer (server: %d, src: %s)", r.ServerId, c.GetEndPnt())
 	default:
 		log.Errorf("Unknown server type (src %s)", c.GetEndPnt())
 	}

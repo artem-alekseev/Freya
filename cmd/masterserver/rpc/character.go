@@ -26,7 +26,7 @@ func LoadCharacters(_ *rpc.Client, r *character.ListReq, s *character.ListRes) e
 
 	var rows, err = db.Queryx(
 		"SELECT "+
-			"id, name, level, world, x, y, alz, nation, sword_rank, magic_rank, "+
+			"id, name, level, world, x, y, alz, nation, guild_no, sword_rank, magic_rank, "+
 			"sword_exp, magic_exp, sword_point, magic_point, sword_rank_exp, magic_rank_exp, "+
 			"current_hp, max_hp, current_mp, max_mp, current_sp, max_sp, str_stat, "+
 			"int_stat, dex_stat, pnt_stat, exp, war_exp, premium_service, premium_expire, created "+
@@ -279,6 +279,7 @@ func DeleteCharacter(_ *rpc.Client, r *character.DeleteReq, s *character.DeleteR
 	db.MustExec("DELETE FROM characters_warehouse WHERE id = ?", r.CharId)
 	db.MustExec("DELETE FROM characters_quickslots WHERE id = ?", r.CharId)
 	db.MustExec("DELETE FROM characters_skills WHERE id = ?", r.CharId)
+	db.MustExec("DELETE FROM guild_members WHERE character_id = ?", r.CharId)
 	db.MustExec("DELETE FROM characters WHERE id = ?", r.CharId)
 
 	res.Result = character.Success

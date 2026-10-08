@@ -71,6 +71,7 @@ type Character struct {
 	LiveStyle      int32 `db:"-"`
 	Alz            uint64
 	Nation         byte   `db:"nation"`
+	GuildNo        uint32 `db:"guild_no"`
 	SwordRank      byte   `db:"sword_rank"`
 	MagicRank      byte   `db:"magic_rank"`
 	SwordExp       uint16 `db:"sword_exp"`

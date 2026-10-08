@@ -65,8 +65,7 @@ func (sm *ServerManager) GetGameServerList() []server.ServerItem {
 
 	sm.lock.RLock()
 	for _, value := range sm.servers {
-		// this is login server
-		if value.ServerId == 0 {
+		if value.Type != server.GAME_SERVER {
 			continue
 		}
 
@@ -140,10 +139,28 @@ func (sm *ServerManager) SendToLS(m string, a interface{}, r interface{}) error 
 	return nil
 }
 
+// SendToChat sends an RPC call to the ChatServer for a world server.
+func (sm *ServerManager) SendToChat(serverID byte, m string, a interface{}, r interface{}) error {
+	sm.lock.RLock()
+	for _, value := range sm.servers {
+		if value.Type == server.CHAT_SERVER && value.ServerId == serverID {
+			c := value.Client
+			sm.lock.RUnlock()
+			return c.Call(m, a, r)
+		}
+	}
+	sm.lock.RUnlock()
+
+	return nil
+}
+
 // Attempts to find logged in user in all servers by account id
 func (sm *ServerManager) IsOnline(id int32) bool {
 	sm.lock.RLock()
 	for _, value := range sm.servers {
+		if value.Type != server.GAME_SERVER {
+			continue
+		}
 		var c = value.Client
 		var res = account.OnlineRes{}
 		var err = c.Call(rpc.OnlineCheck, account.OnlineReq{id, false}, &res)
@@ -162,6 +179,9 @@ func (sm *ServerManager) IsOnline(id int32) bool {
 func (sm *ServerManager) KickAccount(id int32) bool {
 	sm.lock.RLock()
 	for _, value := range sm.servers {
+		if value.Type != server.GAME_SERVER {
+			continue
+		}
 		var c = value.Client
 		var res = account.OnlineRes{}
 		var err = c.Call(rpc.OnlineCheck, account.OnlineReq{id, true}, &res)

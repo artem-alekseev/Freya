@@ -35,12 +35,16 @@ type Session struct {
 
 	PeriodicJobs map[string]*PeriodicTask
 	jobMutex     sync.Mutex
+	closeOnce    sync.Once
+	closed       chan struct{}
 }
 
 // Starts session goroutine
 func (s *Session) Start(table encryption.XorKeyTable) {
-	// create new receiving buffer
-	s.buffer = make([]byte, MAX_RECV_BUFFER_SIZE)
+	// Keep a separate read buffer and accumulate data in s.buffer. TCP is a
+	// stream: one Read may contain a partial packet or several packets.
+	s.buffer = make([]byte, 0, MAX_RECV_BUFFER_SIZE)
+	readBuffer := make([]byte, MAX_RECV_BUFFER_SIZE)
 	// create map to store periodic tasks
 	s.PeriodicJobs = make(map[string]*PeriodicTask)
 
@@ -48,38 +52,52 @@ func (s *Session) Start(table encryption.XorKeyTable) {
 	s.Encryption = encryption.Encryption{}
 	s.Encryption.Init(&table)
 
+	firstPacket := true
 	for {
-		// read data
-		var length, err = s.socket.Read(s.buffer)
-
-		if err != nil {
-			if err != io.EOF {
-				log.Error("Error reading: " + err.Error())
-			}
-			s.Close()
-			break
+		length, err := s.socket.Read(readBuffer)
+		if length > 0 {
+			s.buffer = append(s.buffer, readBuffer[:length]...)
 		}
 
-		var i = 0
-		for i < length {
-			// get packet length
-			var packetLength = s.Encryption.GetPacketSize(s.buffer[i:])
+		closeSession := false
+		for len(s.buffer) > 0 {
+			if s.IsClosed() {
+				break
+			}
 
-			// check length
-			if i < 0 || i > len(s.buffer) || i+packetLength > len(s.buffer) {
-				log.Error("Error parsing packet: slice bounds out of range!")
-				s.Close()
+			// The first client packet has a fixed size. Subsequent packet
+			// sizes are stored in the encrypted four-byte header.
+			minimumHeader := 4
+			if firstPacket {
+				minimumHeader = encryption.Connect2SvrSize
+			}
+			if len(s.buffer) < minimumHeader {
+				break
+			}
+
+			packetLength := s.Encryption.GetPacketSize(s.buffer)
+			if packetLength < encryption.C2SHeaderSize {
+				log.Errorf("Invalid packet length: %d", packetLength)
+				closeSession = true
+				break
+			}
+			if len(s.buffer) < packetLength {
+				// The packet is split across TCP reads. Keep it for the next
+				// iteration instead of closing the connection.
 				break
 			}
 
 			// attempt to decrypt packet
-			var data, error = s.Encryption.Decrypt(s.buffer[i : i+packetLength])
+			data, decryptErr := s.Encryption.Decrypt(s.buffer[:packetLength])
 
-			if error != nil {
-				log.Error("Error decrypting: " + error.Error())
-				s.Close()
+			if decryptErr != nil {
+				log.Error("Error decrypting: " + decryptErr.Error())
+				closeSession = true
 				break
 			}
+			copy(s.buffer, s.buffer[packetLength:])
+			s.buffer = s.buffer[:len(s.buffer)-packetLength]
+			firstPacket = false
 
 			// create new packet reader
 			var reader = NewReader(data)
@@ -95,8 +113,21 @@ func (s *Session) Start(table encryption.XorKeyTable) {
 
 			// trigger packet received event
 			event.Trigger(event.PacketReceiveEvent, arg)
+		}
 
-			i += packetLength
+		if s.IsClosed() {
+			break
+		}
+		if closeSession {
+			s.Close()
+			break
+		}
+		if err != nil {
+			if err != io.EOF {
+				log.Error("Error reading: " + err.Error())
+			}
+			s.Close()
+			break
 		}
 	}
 }
@@ -158,9 +189,28 @@ func (s *Session) IsLocal() bool {
 
 // Closes session socket
 func (s *Session) Close() {
-	s.RemoveAllJobs()
-	s.socket.Close()
-	event.Trigger(event.ClientDisconnectEvent, s)
+	s.closeOnce.Do(func() {
+		if s.closed != nil {
+			close(s.closed)
+		}
+		s.RemoveAllJobs()
+		s.socket.Close()
+		event.Trigger(event.ClientDisconnectEvent, s)
+	})
+}
+
+// IsClosed reports whether the session has already started its close path.
+func (s *Session) IsClosed() bool {
+	if s.closed == nil {
+		return false
+	}
+
+	select {
+	case <-s.closed:
+		return true
+	default:
+		return false
+	}
 }
 
 // AddJob adds a periodic task to the session's job list in a thread-safe manner.

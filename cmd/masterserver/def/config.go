@@ -29,7 +29,7 @@ func (c *Config) Read() {
 	}
 
 	// read values from configuration...
-	c.Port = conf.GetInt("network", "port", 9001)
+	c.Port = conf.GetInt("network", "port", 9002)
 
 	// login db
 	c.LoginDB = &database.Database{}
@@ -70,6 +70,9 @@ func (c *Config) LoadGameDB() {
 func (c *Config) GetDBConfig(db *database.Database) string {
 	var str = db.User + ":" + db.Pass
 	str += "@tcp(" + db.Ip + ":" + strconv.Itoa(db.Port) + ")"
-	str += "/" + db.Name + "?parseTime=true"
+	// ChatNode text fields are converted to UTF-8 before they reach the
+	// database. Explicitly set the connection charset so MariaDB does not
+	// interpret those bytes using its latin1 server default.
+	str += "/" + db.Name + "?parseTime=true&charset=utf8mb4"
 	return str
 }

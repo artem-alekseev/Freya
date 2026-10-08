@@ -45,6 +45,7 @@ CREATE TABLE `characters` (
   `show_helmet` tinyint(1) NOT NULL DEFAULT '0',
   `alz` bigint(20) UNSIGNED NOT NULL DEFAULT '0',
   `nation` tinyint(3) UNSIGNED NOT NULL DEFAULT '0',
+  `guild_no` int(10) UNSIGNED NOT NULL DEFAULT '0',
   `sword_rank` tinyint(3) UNSIGNED NOT NULL DEFAULT '1',
   `magic_rank` tinyint(3) UNSIGNED NOT NULL DEFAULT '1',
   `sword_exp` smallint(5) UNSIGNED NOT NULL DEFAULT '0',
@@ -68,6 +69,40 @@ CREATE TABLE `characters` (
   `premium_service` tinyint(3) UNSIGNED NOT NULL DEFAULT '0',
   `premium_expire` bigint(20) UNSIGNED NOT NULL DEFAULT '0',
   `created` datetime NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=latin1 ROW_FORMAT=COMPACT;
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `guilds`
+--
+
+CREATE TABLE `guilds` (
+  `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT,
+  `name` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  `master_character_id` int(11) NOT NULL,
+  `guild_type` tinyint(3) UNSIGNED NOT NULL DEFAULT '0',
+  `level` tinyint(3) UNSIGNED NOT NULL DEFAULT '1',
+  `created` bigint(20) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_guilds_name` (`name`),
+  KEY `idx_guilds_master` (`master_character_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 ROW_FORMAT=COMPACT;
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `guild_members`
+--
+
+CREATE TABLE `guild_members` (
+  `guild_id` int(10) UNSIGNED NOT NULL,
+  `character_id` int(11) NOT NULL,
+  `group_id` int(10) UNSIGNED NOT NULL DEFAULT '0',
+  `joined` bigint(20) NOT NULL,
+  PRIMARY KEY (`guild_id`,`character_id`),
+  UNIQUE KEY `uq_guild_members_character` (`character_id`),
+  KEY `idx_guild_members_character` (`character_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=latin1 ROW_FORMAT=COMPACT;
 
 -- --------------------------------------------------------
@@ -98,6 +133,52 @@ CREATE TABLE `characters_inventory` (
   `opt` int(10) UNSIGNED NOT NULL,
   `slot` smallint(5) UNSIGNED NOT NULL,
   `expire` int(10) UNSIGNED NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=latin1 ROW_FORMAT=COMPACT;
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `characters_mail`
+--
+
+CREATE TABLE `characters_mail` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `sender_id` int(11) NOT NULL,
+  `sender_name` varchar(17) CHARACTER SET utf8 COLLATE utf8_bin NOT NULL,
+  `receiver_id` int(11) NOT NULL,
+  `receiver_name` varchar(17) CHARACTER SET utf8 COLLATE utf8_bin NOT NULL,
+  `mail_type` tinyint(3) UNSIGNED NOT NULL DEFAULT '1',
+  `state` tinyint(3) UNSIGNED NOT NULL DEFAULT '0',
+  `delivery_time` bigint(20) NOT NULL,
+  `title` varchar(41) CHARACTER SET utf8 NOT NULL,
+  `content` varchar(513) CHARACTER SET utf8 NOT NULL,
+  `attachment_alz` bigint(20) UNSIGNED NOT NULL DEFAULT '0',
+  `attachment_kind` int(10) UNSIGNED NOT NULL DEFAULT '0',
+  `attachment_serials` int(10) UNSIGNED NOT NULL DEFAULT '0',
+  `attachment_option` int(11) NOT NULL DEFAULT '0',
+  `attachment_expire` int(10) UNSIGNED NOT NULL DEFAULT '0',
+  `deleted_sender` tinyint(1) NOT NULL DEFAULT '0',
+  `deleted_receiver` tinyint(1) NOT NULL DEFAULT '0',
+  PRIMARY KEY (`id`),
+  KEY `idx_mail_receiver` (`receiver_id`,`deleted_receiver`,`id`),
+  KEY `idx_mail_sender` (`sender_id`,`deleted_sender`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=latin1 ROW_FORMAT=COMPACT;
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `characters_buddies`
+--
+
+CREATE TABLE `characters_buddies` (
+  `character_id` int(11) NOT NULL,
+  `buddy_id` int(11) NOT NULL,
+  `group_id` tinyint(3) UNSIGNED NOT NULL DEFAULT '0',
+  `memo` varchar(50) CHARACTER SET utf8 NOT NULL DEFAULT '',
+  `created` bigint(20) NOT NULL,
+  PRIMARY KEY (`character_id`,`buddy_id`),
+  KEY `idx_buddies_buddy` (`buddy_id`,`character_id`),
+  KEY `idx_buddies_group` (`character_id`,`group_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=latin1 ROW_FORMAT=COMPACT;
 
 -- --------------------------------------------------------

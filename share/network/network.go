@@ -51,7 +51,7 @@ func (n *Network) Init(port int, s *server.Settings) {
 		}
 
 		// create user session
-		var session = Session{socket: socket}
+		var session = Session{socket: socket, closed: make(chan struct{})}
 
 		n.lock.RLock()
 		// in case its used already...
@@ -80,9 +80,11 @@ func (n *Network) Init(port int, s *server.Settings) {
 		}
 
 		n.lock.Lock()
-		n.clients[n.userIdx] = &session             // add new session
-		session.UserIdx = n.userIdx                 // update session user index
-		session.AuthKey = uint32(time.Now().Unix()) // set auth key
+		n.clients[n.userIdx] = &session // add new session
+		session.UserIdx = n.userIdx     // update session user index
+		// The client can reconnect within the same second. Use millisecond
+		// precision so the new handshake never reuses the previous key.
+		session.AuthKey = uint32(time.Now().UnixMilli()) // set auth key
 		n.userIdx++
 		n.lock.Unlock()
 

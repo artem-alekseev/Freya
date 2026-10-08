@@ -14,8 +14,8 @@
 зарегистрирован в `cmd/gameserver/packet/packet.go` с ненулевым обработчиком.
 
 Всего client → server пакетов: `342`
-Готовые: `88`
-Не готовые: `254`
+Готовые: `86`
+Не готовые: `256`
 
 ## Готовые
 
@@ -348,8 +348,6 @@
 2128 CSC_MAIL_DELETE_RECEIVED
 2129 CSC_MAIL_DELETE_SENT
 2130 CSC_MAIL_REPORT
-2131 CSC_MAIL_GET_RECEIVED_PET_INFO
-2132 CSC_MAIL_GET_SENT_PET_INFO
 2135 CSC_MERGE_ITEMEFFECT
 2137 CSC_DUNGEON_PAUSE
 2138 CSC_DUNGEON_RELEASE

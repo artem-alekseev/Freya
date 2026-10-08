@@ -5,6 +5,7 @@ import "github.com/ubis/Freya/share/rpc"
 const (
 	LOGIN_SERVER = 1
 	GAME_SERVER  = 2
+	CHAT_SERVER  = 3
 )
 
 type RegisterReq struct {
